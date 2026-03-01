@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prompt Forge — Settings</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: #0d0d1a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 48px 16px;
+    }
+
+    .page {
+      width: 100%;
+      max-width: 520px;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header h1 {
+      font-size: 22px;
+      font-weight: 700;
+      background: linear-gradient(120deg, #a78bfa 30%, #60a5fa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .version {
+      font-size: 11px;
+      color: #475569;
+      margin-top: 4px;
+    }
+
+    /* Card */
+    .card {
+      background: #13131f;
+      border: 1px solid #252540;
+      border-radius: 12px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .card-title {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: #a78bfa;
+    }
+
+    /* Form elements */
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 13px;
+      color: #94a3b8;
+      font-weight: 500;
+    }
+
+    .field-desc {
+      font-size: 11px;
+      color: #475569;
+      font-weight: 400;
+      line-height: 1.5;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    input[type="password"],
+    input[type="text"] {
+      flex: 1;
+      padding: 9px 12px;
+      background: #1a1a2e;
+      border: 1px solid #252540;
+      border-radius: 8px;
+      color: #e2e8f0;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s;
+      min-width: 0;
+    }
+    input:focus { border-color: #7c3aed; }
+    input::placeholder { color: #3d3d5c; }
+
+    .toggle-vis {
+      padding: 8px 12px;
+      background: transparent;
+      border: 1px solid #252540;
+      border-radius: 7px;
+      color: #64748b;
+      font-size: 11px;
+      font-family: inherit;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: color 0.12s, border-color 0.12s;
+      flex-shrink: 0;
+    }
+    .toggle-vis:hover { color: #a78bfa; border-color: #7c3aed; }
+
+    /* Save button */
+    .save-btn {
+      padding: 10px 20px;
+      background: linear-gradient(135deg, #7c3aed, #4f46e5);
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+      align-self: flex-start;
+      box-shadow: 0 2px 12px rgba(124,58,237,0.35);
+    }
+    .save-btn:hover { opacity: 0.88; transform: translateY(-1px); }
+    .save-btn:active { transform: translateY(0); }
+
+    /* Status message */
+    #status {
+      font-size: 12px;
+      min-height: 18px;
+      transition: color 0.2s;
+    }
+    #status.ok    { color: #10b981; }
+    #status.error { color: #f87171; }
+
+    /* Info / link rows */
+    .info-row {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 12px;
+      color: #64748b;
+      line-height: 1.6;
+    }
+
+    a {
+      color: #a78bfa;
+      text-decoration: none;
+    }
+    a:hover { text-decoration: underline; }
+
+    .tag {
+      display: inline-block;
+      padding: 1px 7px;
+      background: #1a1a2e;
+      border: 1px solid #252540;
+      border-radius: 4px;
+      font-size: 11px;
+      color: #94a3b8;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+    }
+
+    /* Divider */
+    hr { border: none; border-top: 1px solid #1e1e3a; }
+
+    /* How it works section */
+    .steps {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      font-size: 12px;
+      color: #64748b;
+      line-height: 1.6;
+    }
+    .step {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+    .step-num {
+      flex-shrink: 0;
+      width: 20px;
+      height: 20px;
+      background: #1a1a2e;
+      border: 1px solid #252540;
+      border-radius: 50%;
+      font-size: 10px;
+      font-weight: 700;
+      color: #a78bfa;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 1px;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+
+    <!-- Header -->
+    <div class="header">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <defs>
+          <linearGradient id="og" x1="12" y1="2" x2="12" y2="22" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#c4b5fd"/>
+            <stop offset="100%" stop-color="#7c3aed"/>
+          </linearGradient>
+        </defs>
+        <path d="M12 2C9.5 5.5 6 9.5 6 14a6 6 0 0012 0c0-4.5-3.5-8.5-6-12z" fill="url(#og)"/>
+        <path d="M12 8c-1.5 2.5-2.5 4.5-2.5 6a2.5 2.5 0 005 0c0-1.5-1-3.5-2.5-6z"
+              fill="white" opacity="0.45"/>
+      </svg>
+      <div>
+        <h1>Prompt Forge</h1>
+        <div class="version">Settings · v1.1.0</div>
+      </div>
+    </div>
+
+    <!-- API Key card -->
+    <div class="card">
+      <div class="card-title">Groq API Key</div>
+
+      <label>
+        API Key
+        <span class="field-desc">
+          Used to call <span class="tag">llama-3.3-70b-versatile</span> for AI-powered
+          prompt optimization on claude.ai. Stored locally in your browser — never sent
+          anywhere except Groq's API.
+        </span>
+        <div class="input-row">
+          <input type="password" id="apiKeyInput" placeholder="gsk_…" autocomplete="off" spellcheck="false"/>
+          <button class="toggle-vis" id="toggleVis" type="button">Show</button>
+        </div>
+      </label>
+
+      <button class="save-btn" id="saveBtn" type="button">Save Key</button>
+      <div id="status"></div>
+
+      <hr>
+
+      <div class="info-row">
+        <span>🆓 Groq has a generous free tier — no credit card needed to start.</span>
+        <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer">
+          Get a free API key at console.groq.com →
+        </a>
+      </div>
+    </div>
+
+    <!-- How it works card -->
+    <div class="card">
+      <div class="card-title">How it works on claude.ai</div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <span>Open <a href="https://claude.ai" target="_blank">claude.ai</a> and start typing a prompt in the chat box</span>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <span>An <strong style="color:#c4b5fd">⚡ Optimize</strong> button appears next to the Send button</span>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <span>Click it — Prompt Forge reads your prompt and the current conversation for context</span>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <span>It fetches relevant example prompts from prompts.chat, then calls Groq to rewrite yours</span>
+        </div>
+        <div class="step">
+          <div class="step-num">5</div>
+          <span>The improved prompt is placed back in the chat box, ready to review and send</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Popup note -->
+    <div class="card">
+      <div class="card-title">Popup (any site)</div>
+      <div class="info-row">
+        Click the Prompt Forge toolbar icon on any page to open the standalone popup.
+        It searches prompts.chat directly and shows the best matching curated prompt —
+        no API key required for this mode.
+      </div>
+    </div>
+
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>

@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prompt Forge</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+
+    <!-- Header -->
+    <header>
+      <div class="logo">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <defs>
+            <linearGradient id="flame-grad" x1="12" y1="2" x2="12" y2="22" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#c4b5fd"/>
+              <stop offset="100%" stop-color="#7c3aed"/>
+            </linearGradient>
+          </defs>
+          <!-- Outer flame -->
+          <path d="M12 2C9.5 5.5 6 9.5 6 14a6 6 0 0012 0c0-4.5-3.5-8.5-6-12z"
+                fill="url(#flame-grad)"/>
+          <!-- Inner highlight -->
+          <path d="M12 8c-1.5 2.5-2.5 4.5-2.5 6a2.5 2.5 0 005 0c0-1.5-1-3.5-2.5-6z"
+                fill="white" opacity="0.45"/>
+        </svg>
+        <h1>Prompt Forge</h1>
+      </div>
+      <span class="tagline">powered by prompts.chat</span>
+      <button id="settingsBtn" class="settings-btn" title="Settings" aria-label="Open settings">⚙</button>
+    </header>
+
+    <!-- Input -->
+    <section class="input-section">
+      <textarea
+        id="promptInput"
+        placeholder="Describe what you want to do, or paste a rough prompt…&#10;&#10;e.g. &quot;help me write better cold emails&quot;"
+        spellcheck="false"
+        autocomplete="off"
+      ></textarea>
+
+      <div class="chips-label">Context filter</div>
+      <div class="chips" id="categoryChips" role="group" aria-label="Category filter">
+        <button class="chip active" data-category="" aria-pressed="true">All</button>
+        <button class="chip" data-category="coding"    aria-pressed="false">Coding</button>
+        <button class="chip" data-category="writing"   aria-pressed="false">Writing</button>
+        <button class="chip" data-category="marketing" aria-pressed="false">Marketing</button>
+        <button class="chip" data-category="education" aria-pressed="false">Education</button>
+        <button class="chip" data-category="business"  aria-pressed="false">Business</button>
+        <button class="chip" data-category="creative"  aria-pressed="false">Creative</button>
+        <button class="chip" data-category="analysis"  aria-pressed="false">Analysis</button>
+      </div>
+
+      <button class="optimize-btn" id="optimizeBtn" aria-label="Optimize prompt">
+        <!-- Bolt icon -->
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
+             aria-hidden="true">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+        </svg>
+        <span id="btnText">Optimize Prompt</span>
+        <span id="btnSpinner" class="spinner hidden" aria-hidden="true"></span>
+      </button>
+    </section>
+
+    <!-- Error -->
+    <div class="error-section hidden" id="errorSection" role="alert">
+      <svg class="error-icon" width="13" height="13" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+           aria-hidden="true">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="8" x2="12" y2="12"/>
+        <line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      <span id="errorMessage"></span>
+    </div>
+
+    <!-- Results -->
+    <section class="results-section hidden" id="resultsSection" aria-live="polite">
+
+      <div class="result-header">
+        <h2>Optimized Prompt</h2>
+        <button class="copy-btn" id="copyBtn" aria-label="Copy optimized prompt">Copy</button>
+      </div>
+
+      <div class="result-card">
+        <div class="result-title" id="resultTitle"></div>
+        <div class="result-content" id="resultContent"></div>
+        <div class="result-meta">
+          <span class="result-category hidden" id="resultCategory"></span>
+          <a class="source-link" href="https://prompts.chat" target="_blank"
+             rel="noopener noreferrer">via prompts.chat ↗</a>
+        </div>
+      </div>
+
+      <!-- Related prompts -->
+      <div class="inspirations hidden" id="inspirationsSection">
+        <h3>Related Prompts — click to copy</h3>
+        <div class="inspiration-list" id="inspirationList"></div>
+      </div>
+
+      <div class="status-bar" id="statusBar"></div>
+
+    </section>
+
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
