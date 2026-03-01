@@ -643,7 +643,31 @@
       );
       console.info(PF, '.font-claude-message count:',
         document.querySelectorAll('.font-claude-message').length);
-      return { turns: [], lastAssistantMessage: null };
+
+      // Broad fallback: when structured selectors fail, scan for any large text
+      // block that looks like an AI response so Agent 1 still has something to
+      // classify domain/task from. Exclude our own injected panels.
+      const BROAD_SELS = [
+        '[class*="markdown"]:not(#pf-diff *):not(#pf-questions *)',
+        '[class*="prose"]:not(#pf-diff *):not(#pf-questions *)',
+        '[class*="response-text"]:not(#pf-diff *)',
+        '[class*="assistant"]:not(#pf-diff *)',
+        '[class*="claude"]:not(#pf-diff *)',
+      ];
+      let broadLastMsg = null;
+      for (const sel of BROAD_SELS) {
+        try {
+          const els = [...document.querySelectorAll(sel)]
+            .filter(el => (el.textContent || '').trim().length > 150);
+          if (els.length > 0) {
+            broadLastMsg = (els[els.length - 1].textContent || '').trim().slice(0, 3000);
+            console.log(PF, `Broad fallback: recovered last response (${broadLastMsg.length} chars) via "${sel}"`);
+            break;
+          }
+        } catch { /* invalid selector — skip */ }
+      }
+      if (!broadLastMsg) console.warn(PF, 'Broad fallback also found nothing — pipeline will run without context.');
+      return { turns: [], lastAssistantMessage: broadLastMsg };
     }
 
     // ── Merge and sort by DOM document order ──────────────────────────────
@@ -1129,6 +1153,33 @@
     }
 
     const { turns: chatHistory, lastAssistantMessage } = scrapeConversation();
+    const hasContext = chatHistory.length > 0 || !!lastAssistantMessage;
+
+    // ── Vague prompt + no context → auto-redirect to Guide mode ─────────────
+    // A short vague prompt ("help me", "fix this") with zero chat context
+    // produces a useless generic rewrite. Guide mode collects intent first.
+    if (raw.trim().length < 20 && !hasContext && activeMode !== 'guided') {
+      toast(
+        '💡 Short prompt + no chat history detected — switching to <strong>Guide</strong> mode for a better result.',
+        'info', 5500
+      );
+      activeMode = 'guided';
+      document.querySelectorAll('.pf-mode-chip').forEach(c =>
+        c.classList.toggle('pf-mode-active', c.dataset.mode === 'guided')
+      );
+      showIntentPanel((answers) => {
+        runPipeline(raw, chatHistory, lastAssistantMessage, answers, editor);
+      });
+      return;
+    }
+
+    // ── Warn (but don't block) when context is missing for longer prompts ────
+    if (!hasContext) {
+      toast(
+        '⚠️ No chat history found — result may be generic. Try <strong>Guide</strong> mode to describe your goal.',
+        'info', 5000
+      );
+    }
 
     // ── Guided mode: show intent panel first, then run ───────────────────────
     if (activeMode === 'guided') {

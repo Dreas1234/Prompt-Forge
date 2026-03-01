@@ -618,8 +618,13 @@ async function runOptimizePipeline(apiKey, userPrompt, chatHistory, lastAssistan
   let domain = 'generic';
   let taskType = 'knowledge'; // default; overridden by Agent 1 TASK_TYPE field
 
-  if (chatHistory && chatHistory.length > 0) {
-    const historyText = chatHistory.map(m => `${m.role}: ${m.content}`).join('\n');
+  // Run Agent 1 if we have EITHER full chat history OR at least lastAssistantMessage.
+  // When structured DOM selectors fail, the broad fallback recovers lastAssistantMessage —
+  // enough for Agent 1 to classify domain and extract intent from.
+  if ((chatHistory && chatHistory.length > 0) || lastAssistantMessage) {
+    const historyText = chatHistory.length > 0
+      ? chatHistory.map(m => `${m.role}: ${m.content}`).join('\n')
+      : '[Chat history unavailable — structured selectors did not match the page DOM]';
     try {
       // Generic playbook applies at Agent 1 stage (domain unknown yet) — inform the GOAL field.
       // strategyDoc (ACE format) is richer than bullet rules; use it when available.
@@ -647,7 +652,9 @@ TECH: [exact languages, frameworks, libraries, tools, versions — "none" if not
 
 Rules: Copy exact names, numbers, and error messages. Never substitute "some function" for the real function name. Never write "the user's code" when you can write the actual function name.
 If history is empty, output all fields as "none" except DOMAIN which must be "generic" and TASK_TYPE which must be "knowledge-bound".${styleRulesBlock}`,
-        `User's new prompt: "${userPrompt}"\n\nConversation history:\n${historyText}`,
+        chatHistory.length > 0
+          ? `User's new prompt: "${userPrompt}"\n\nConversation history:\n${historyText}`
+          : `User's new prompt: "${userPrompt}"\n\nLast AI response (full chat history unavailable — use this to infer domain, task, and any verbatim evidence):\n${lastAssistantMessage}`,
         900,
       );
 
