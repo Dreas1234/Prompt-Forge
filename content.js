@@ -591,6 +591,8 @@
       '[class*="UserMessage"]',
       '[class*="user-message"]',
       '[class*="humanMessage"]',
+      '[data-testid*="human-turn"]',     // substring: catches human-turn, human-turn-container, etc.
+      '[data-testid*="user-turn"]',      // same for user-turn variants
       '[aria-label*="You said" i]',
     ];
 
@@ -614,6 +616,9 @@
       '[class*="assistant-message"]',
       '[class*="assistantMessage"]',
       '[class*="Assistant"]',
+      '[data-testid*="assistant-turn"]', // substring: catches assistant-turn, assistant-turn-container, etc.
+      '[data-testid*="ai-turn"]',        // same for ai-turn variants
+      '.prose',                          // Claude uses this class for formatted responses
       '[aria-label*="Claude" i]',
     ];
 
@@ -658,7 +663,7 @@
       for (const sel of BROAD_SELS) {
         try {
           const els = [...document.querySelectorAll(sel)]
-            .filter(el => (el.textContent || '').trim().length > 150);
+            .filter(el => (el.textContent || '').trim().length > 50);
           if (els.length > 0) {
             broadLastMsg = (els[els.length - 1].textContent || '').trim().slice(0, 3000);
             console.log(PF, `Broad fallback: recovered last response (${broadLastMsg.length} chars) via "${sel}"`);
@@ -1155,12 +1160,15 @@
     const { turns: chatHistory, lastAssistantMessage } = scrapeConversation();
     const hasContext = chatHistory.length > 0 || !!lastAssistantMessage;
 
-    // ── Vague prompt + no context → auto-redirect to Guide mode ─────────────
-    // A short vague prompt ("help me", "fix this") with zero chat context
-    // produces a useless generic rewrite. Guide mode collects intent first.
-    if (raw.trim().length < 20 && !hasContext && activeMode !== 'guided') {
+    // ── Vague prompt + no/thin context → auto-redirect to Guide mode ────────
+    // A short vague prompt ("help me", "fix this") produces a useless generic
+    // rewrite when context is absent or too thin for Agent 1 to extract intent.
+    // "contextIsStrong" requires either ≥3 turns OR a substantial last message —
+    // a single "Hello!" exchange does not count as usable context.
+    const contextIsStrong = chatHistory.length >= 3 || (lastAssistantMessage?.length ?? 0) > 300;
+    if (raw.trim().length < 40 && !contextIsStrong && activeMode !== 'guided') {
       toast(
-        '💡 Short prompt + no chat history detected — switching to <strong>Guide</strong> mode for a better result.',
+        '💡 Vague prompt + insufficient context — switching to <strong>Guide</strong> mode for a better result.',
         'info', 5500
       );
       activeMode = 'guided';

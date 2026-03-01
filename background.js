@@ -57,6 +57,14 @@ const DOMAIN_EXAMPLES = {
       output: '10-year-old: Imagine rolling a ball down a bumpy hill — gradient descent always rolls downhill to find the lowest point.\nProfessional: • Computes loss gradient w.r.t. parameters • Subtracts learning_rate × gradient each step • Repeats until convergence\nReal-world: Training a spam filter — after each email batch, weights shift slightly so the next prediction is slightly more accurate.',
     },
   },
+  meta: {
+    input:  'make a prompt that helps me brainstorm product names',
+    output: '## ROLE\nYou are a creative director with 12 years experience in brand naming and consumer product positioning.\n\n## CONTEXT\nDomain: meta/prompt-engineering. User wants a reusable prompt that, when submitted to an AI, reliably produces high-quality product name brainstorming for a given product brief.\n\n## TASK\n1. Generate 10 product name candidates across three styles: functional (describes what it does), evocative (triggers emotion or imagery), and coined (invented word or blend)\n2. For each name: state the style category, a one-sentence rationale, and a domain availability note (easy/medium/hard to trademark)\n3. Flag the top 2 picks with a ★ and explain why they outperform the rest\n\n## OUTPUT FORMAT\n<structured-list>\nName — Style — Rationale — Trademark difficulty\n★ for top 2 picks, explanation on a separate line\n</structured-list>',
+    exemplar: {
+      input:  'Product: an app that helps remote teams run async standups. Audience: startup engineering teams.',
+      output: 'Functional:\n1. AsyncStand — clear, SEO-rich — Medium trademark\n2. StandLog — concise, dev-friendly — Easy\nEvocative:\n3. Campfire — warmth + gathering — Hard (taken)\n4. ★ Relay — passing the baton, async chain — Medium. Top pick: intuitive metaphor, single word, broad appeal.\nCoined:\n5. ★ Standup·ly — verb-noun blend, memorable — Easy. Top pick: domain likely available, explains itself.',
+    },
+  },
   generic: {
     input:  'what is the optimal food stack',
     output: '## ROLE\nYou are a registered dietitian with 15 years experience in sports nutrition and evidence-based meal planning.\n\n## CONTEXT\nDomain: health/nutrition. User wants ranked, evidence-based food recommendations for optimal overall health.\n\n## TASK\n1. Rank the top 5 most nutrient-dense food combinations for overall health\n2. For each: name it, explain the benefit, state the recommended portion size\n\n## OUTPUT FORMAT\n<numbered-list>\nCombination → Benefit → Portion (highest health impact first)\n</numbered-list>',
@@ -75,7 +83,7 @@ const DOMAIN_EXAMPLES = {
 
 const MODE_INSTRUCTIONS = {
   auto:     '',
-  learn:    'explain step-by-step with concrete examples, use analogies for complex ideas, and end with a one-sentence comprehension check',
+  learn:    'teach for deep understanding, not surface knowledge: open with a one-sentence plain-English definition, then build intuition with at least one concrete analogy that connects the concept to something the learner already knows, explain the underlying "why" before the "what", and close with one comprehension-check question that tests understanding rather than recall',
   // Brief: positive-framing only — every directive states what TO do, never what to avoid.
   brief:    'write exactly 3 bullet points, open each bullet with an active verb, place the single most actionable insight first, keep each bullet to one sentence',
   // Deep: Chain-of-Thought cueing — forces Claude to externalise 8-12 reasoning steps.
@@ -129,6 +137,17 @@ Your rewrite must depart significantly from the original prompt's phrasing and f
   brief: `\
 BRIEF MODE — POSITIVE INSTRUCTION FRAMING ONLY:
 Every line of the rewritten prompt must use positive directives (state what TO do). Never use "don't", "avoid", "no", "without", or any negative construction. Replace "don't be wordy" with "use one sentence per point". Replace "no preamble" with "open with the answer". The <example> Output must itself be tightly constrained — 3 bullets or fewer.`,
+
+  learn: `\
+LEARN MODE — TEACHER PERSONA + FIRST-PROMPT SELF-CONTAINED:
+The user is typically at the start of a conversation (first or second message), so the rewritten prompt MUST be fully self-contained — assume zero prior context in the conversation.
+## ROLE must name a specific teacher/educator persona (e.g. "You are an experienced computer science lecturer", "You are a patient maths tutor") — never a generic expert or practitioner role.
+The rewritten ## TASK must follow this exact teaching sequence:
+  1. Open with a one-sentence plain-English definition
+  2. Build intuition with at least one analogy connecting the concept to something already familiar
+  3. Explain the underlying "why" before the procedural "what"
+  4. Close with a comprehension-check question that probes understanding, not recall
+The <example> Output must demonstrate all four steps — definition → analogy → why → check question. It must NOT look like a reference answer; it must read like a teacher explaining out loud.`,
 };
 
 function buildOptimizerSystemMsg(domain, mode, examples, patternNotes, taskType = 'knowledge') {
@@ -198,7 +217,7 @@ RIGHT: "## CONTEXT\nDomain: code. User is debugging process_dataframe() on 512MB
 EVIDENCE WRONG: paraphrasing 'MemoryError on line 42' as 'a runtime error'
 EVIDENCE RIGHT: quoting it directly — "raises MemoryError on line 42"
 
-NEVER: omit ## ROLE · use 'Determine' or 'Analyze' as first task verb · exceed 4 numbered items in ## TASK · omit XML tag in ## OUTPUT FORMAT · write generic ## CONTEXT when specifics are available · paraphrase EVIDENCE
+NEVER: omit ## ROLE · use 'Determine' or 'Analyze' as first task verb · exceed 4 numbered items in ## TASK · omit XML tag in ## OUTPUT FORMAT · write generic ## CONTEXT when specifics are available · paraphrase EVIDENCE · write a generic role like "You are a helper" or "You are an AI assistant" — always write "You are a [specific job title] with [N] years experience in [domain]" even when context is sparse; infer the most plausible expert from the prompt's intent
 
 DOMAIN EXAMPLE — input: '${ex.input}'
 DOMAIN EXAMPLE — output:
@@ -366,6 +385,10 @@ function extractKeywords(prompt, chatHistory) {
     'make','fix','me','please','like','get','let','use','want','need','give',
     'tell','show','write','create','add','more','better','good','some','any',
     'very','really','quite','then','now','up','out','all','new','can',
+    // Meta-prompt words — these describe the act of prompting, not the topic,
+    // so they pollute the prompts.chat search with prompt-engineering results.
+    'prompt','prompts','system','claude','chatgpt','gpt','openai','anthropic',
+    'optimize','optimise','rewrite','improve','generate','build',
   ]);
 
   // Weight the user's own prompt heavier than context
@@ -641,7 +664,8 @@ async function runOptimizePipeline(apiKey, userPrompt, chatHistory, lastAssistan
         `You are a conversation analyst. Extract structured facts from the conversation.
 
 Output EXACTLY this format — one field per line, no extra text:
-DOMAIN: [code / writing / data / creative / research / generic]
+DOMAIN: [code / writing / data / creative / research / meta / generic]
+→ Use "meta" when the user's GOAL is to produce a reusable prompt, system prompt, or instruction set for an AI — i.e. the output of a successful response would itself be a prompt, not an answer. Examples: "write a system prompt that…", "make a prompt to help me…", "create instructions for Claude to…", "build a reusable prompt for…".
 TASK_TYPE: [reasoning-bound → task requires multi-step logic, code, math, debugging, or algorithms / knowledge-bound → task requires facts, summaries, writing, definitions, or research]
 TASK: [one sentence — what the user is currently trying to accomplish]
 CONTEXT: [2-3 specific facts copied VERBATIM — exact file names, exact function names, exact error messages, exact URLs as they appear in the conversation. Do NOT paraphrase. Separate facts with " | ". Example: "process_dataframe() | MemoryError on line 42 | 512MB Lambda limit"]
