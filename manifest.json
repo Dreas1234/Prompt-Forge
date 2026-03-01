@@ -17,7 +17,10 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://claude.ai/*"],
+      "matches": [
+        "https://claude.ai/*",
+        "https://gemini.google.com/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_idle"
     }
@@ -26,6 +29,7 @@
   "permissions": ["storage"],
   "host_permissions": [
     "https://prompts.chat/*",
-    "https://api.groq.com/*"
+    "https://api.groq.com/*",
+    "https://gemini.google.com/*"
   ]
 }

@@ -9,6 +9,10 @@
   if (window.__pfInjected) return;
   window.__pfInjected = true;
 
+  /* ── Platform detection ────────────────────────────────────────────────── */
+  // Drives selector strategy for findEditor, setEditorText, scrapeConversation.
+  const PLATFORM = location.hostname.includes('gemini.google.com') ? 'gemini' : 'claude';
+
   /* ── Styles injected into the host page ───────────────────────────────── */
 
   const CSS = `
@@ -437,10 +441,25 @@
     btn.style.whiteSpace = '';
   }
 
-  /* ── Find Claude's contenteditable input ───────────────────────────────── */
+  /* ── Find the platform's contenteditable input ─────────────────────────── */
 
   function findEditor() {
-    // Ordered from most to least specific
+    // Gemini uses Quill editor inside a <rich-textarea> custom element
+    if (PLATFORM === 'gemini') {
+      const candidates = [
+        'rich-textarea .ql-editor[contenteditable="true"]',
+        'rich-textarea div[contenteditable="true"]',
+        '.ql-editor[contenteditable="true"]',
+        'div[contenteditable="true"]',
+      ];
+      for (const sel of candidates) {
+        const el = document.querySelector(sel);
+        if (el) return el;
+      }
+      return null;
+    }
+
+    // Claude: ProseMirror contenteditable (ordered most → least specific)
     const candidates = [
       'div[contenteditable="true"][data-placeholder]',
       'div.ProseMirror[contenteditable="true"]',
@@ -500,7 +519,7 @@
     return editor.innerText.replace(/\n{3,}/g, '\n\n').trim();
   }
 
-  /* ── Write text back (React-safe via execCommand, with fallback) ───────── */
+  /* ── Write text back (platform-aware) ──────────────────────────────────── */
 
   function setEditorText(editor, text) {
     editor.focus();
@@ -513,16 +532,30 @@
     sel.addRange(range);
 
     // execCommand('insertText') fires the native InputEvent that React/ProseMirror
-    // listens to, so state stays in sync without reaching into React internals.
+    // and Quill both listen to — keeps framework state in sync.
     const ok = document.execCommand('insertText', false, text);
 
     if (!ok) {
-      // Fallback: direct innerText + manual events
-      editor.innerText = text;
-      editor.dispatchEvent(new InputEvent('input', {
-        bubbles: true, cancelable: true, data: text, inputType: 'insertText',
-      }));
-      editor.dispatchEvent(new Event('change', { bubbles: true }));
+      if (PLATFORM === 'gemini') {
+        // Quill fallback: rebuild as <p> paragraphs, then fire input on both
+        // the .ql-editor div and its parent <rich-textarea> Angular component.
+        editor.innerHTML = text
+          .split('\n')
+          .map(line => `<p>${line || '<br>'}</p>`)
+          .join('');
+        editor.dispatchEvent(new InputEvent('input', {
+          bubbles: true, cancelable: true, data: text, inputType: 'insertText',
+        }));
+        const richTextarea = editor.closest('rich-textarea');
+        if (richTextarea) richTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+      } else {
+        // Claude / ProseMirror fallback
+        editor.innerText = text;
+        editor.dispatchEvent(new InputEvent('input', {
+          bubbles: true, cancelable: true, data: text, inputType: 'insertText',
+        }));
+        editor.dispatchEvent(new Event('change', { bubbles: true }));
+      }
     }
 
     // Move caret to end
@@ -539,13 +572,15 @@
   function scrapeConversation() {
     const PF = '[PromptForge scrape]';
 
-    // ── Each role gets its own independent selector list ───────────────────
-    // Previously both roles had to come from the same pair, so if human-turn
-    // matched but ai-turn returned 0, we'd lock in 0 assistant elements and
-    // never try .font-claude-message. Now each role finds its best selector
-    // independently and we log both counts every time.
-
-    const HUMAN_SELS = [
+    // ── Platform-specific selectors — each role finds its best match independently
+    const HUMAN_SELS = PLATFORM === 'gemini' ? [
+      // Gemini uses Angular custom elements; try specific → generic
+      'user-query-text',
+      '.query-text',
+      'user-query .query-content',
+      '[class*="user-query"]',
+      '[data-message-author-role="user"]',
+    ] : [
       '[data-testid="human-turn"]',
       '[data-testid="user-turn"]',
       '[data-testid="user-message"]',
@@ -559,7 +594,14 @@
       '[aria-label*="You said" i]',
     ];
 
-    const ASSISTANT_SELS = [
+    const ASSISTANT_SELS = PLATFORM === 'gemini' ? [
+      'model-response-text',
+      '.model-response-text',
+      'message-content .markdown',
+      '[class*="model-response"]',
+      '[data-message-author-role="model"]',
+      '.response-container .markdown',
+    ] : [
       '[data-testid="ai-turn"]',
       '[data-testid="assistant-turn"]',
       '[data-testid="assistant-message"]',
@@ -593,7 +635,7 @@
     );
 
     if (humanEls.length === 0 && assistantEls.length === 0) {
-      console.warn(PF, '⚠️  No turns found. All data-testid values in DOM:',
+      console.warn(PF, `⚠️  No turns found (platform: ${PLATFORM}). All data-testid values in DOM:`,
         [...new Set(
           [...document.querySelectorAll('[data-testid]')]
             .map(el => el.getAttribute('data-testid'))
@@ -1049,10 +1091,9 @@
   /* ── Click handler — entry point ──────────────────────────────────────── */
 
   async function handleOptimize() {
-    console.log('[PromptForge] handleOptimize — activeMode:', activeMode);
+    console.log('[PromptForge] handleOptimize — activeMode:', activeMode, '— platform:', PLATFORM);
     const btn    = document.getElementById('pf-optimize-btn');
-    const editor = document.querySelector('.ProseMirror') ||
-                   document.querySelector('[contenteditable="true"]');
+    const editor = findEditor();
 
     if (!editor) {
       toast('❌ Could not find the chat input box.', 'error', 4000);
@@ -1139,8 +1180,7 @@
     if (document.getElementById('pf-optimize-btn')) return;
 
     // Need at least an editor on the page to be useful
-    const editor = document.querySelector('.ProseMirror') ||
-                   document.querySelector('[contenteditable="true"]');
+    const editor = findEditor();
     if (!editor) return;
 
     // ── ⚡ Optimize button ──────────────────────────────────────────────────
