@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Prompt Forge",
-  "version": "1.1.0",
-  "description": "Optimize your AI prompts using curated examples from prompts.chat",
+  "version": "2.0.0",
+  "description": "AI-optimized prompt engineering — searches proven patterns from multiple sources and rewrites for maximum AI performance",
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
@@ -18,8 +18,7 @@
   "content_scripts": [
     {
       "matches": [
-        "https://claude.ai/*",
-        "https://gemini.google.com/*"
+        "https://claude.ai/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle"
@@ -30,6 +29,7 @@
   "host_permissions": [
     "https://prompts.chat/*",
     "https://api.groq.com/*",
-    "https://gemini.google.com/*"
+    "https://api.anthropic.com/*",
+    "https://raw.githubusercontent.com/*"
   ]
 }

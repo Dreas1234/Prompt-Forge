@@ -7,15 +7,42 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    :root {
+      --bg-0: #09090f;
+      --bg-1: #0f0f1a;
+      --bg-2: #161625;
+      --bg-3: #1e1e32;
+      --border: rgba(255, 255, 255, 0.06);
+      --border-hover: rgba(255, 255, 255, 0.12);
+      --accent: #8b5cf6;
+      --accent-hover: #a78bfa;
+      --accent-dim: rgba(139, 92, 246, 0.15);
+      --accent-glow: rgba(139, 92, 246, 0.25);
+      --text-0: #f1f5f9;
+      --text-1: #94a3b8;
+      --text-2: #64748b;
+      --text-3: #334155;
+      --success: #22c55e;
+      --error: #ef4444;
+      --mono: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      --radius: 10px;
+      --radius-sm: 6px;
+    }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-      background: #0d0d1a;
-      color: #e2e8f0;
+      font-family: var(--sans);
+      background: var(--bg-0);
+      color: var(--text-0);
       min-height: 100vh;
       display: flex;
       align-items: flex-start;
       justify-content: center;
       padding: 48px 16px;
+      font-size: 13px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
 
     .page {
@@ -23,34 +50,59 @@
       max-width: 520px;
       display: flex;
       flex-direction: column;
-      gap: 28px;
+      gap: 24px;
     }
 
-    /* Header */
+    /* ── Header ───────────────────────────────────────── */
+
     .header {
       display: flex;
       align-items: center;
       gap: 10px;
     }
-    .header h1 {
-      font-size: 22px;
-      font-weight: 700;
-      background: linear-gradient(120deg, #a78bfa 30%, #60a5fa);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-    .version {
-      font-size: 11px;
-      color: #475569;
-      margin-top: 4px;
+
+    .header-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
 
-    /* Card */
+    .header-text h1 {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text-0);
+      letter-spacing: -0.3px;
+    }
+
+    .header-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 2px;
+    }
+
+    .header-meta .label {
+      font-size: 12px;
+      color: var(--text-2);
+      font-weight: 500;
+    }
+
+    .header-meta .version-badge {
+      padding: 1px 7px;
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--text-2);
+    }
+
+    /* ── Card ─────────────────────────────────────────── */
+
     .card {
-      background: #13131f;
-      border: 1px solid #252540;
-      border-radius: 12px;
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
       padding: 24px;
       display: flex;
       flex-direction: column;
@@ -58,28 +110,29 @@
     }
 
     .card-title {
-      font-size: 13px;
+      font-size: 11px;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.07em;
-      color: #a78bfa;
+      letter-spacing: 0.08em;
+      color: var(--text-2);
     }
 
-    /* Form elements */
+    /* ── Form elements ────────────────────────────────── */
+
     label {
       display: flex;
       flex-direction: column;
       gap: 6px;
       font-size: 13px;
-      color: #94a3b8;
+      color: var(--text-1);
       font-weight: 500;
     }
 
     .field-desc {
-      font-size: 11px;
-      color: #475569;
+      font-size: 12px;
+      color: var(--text-2);
       font-weight: 400;
-      line-height: 1.5;
+      line-height: 1.6;
     }
 
     .input-row {
@@ -92,119 +145,208 @@
     input[type="text"] {
       flex: 1;
       padding: 9px 12px;
-      background: #1a1a2e;
-      border: 1px solid #252540;
-      border-radius: 8px;
-      color: #e2e8f0;
+      background: var(--bg-0);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-0);
       font-size: 13px;
-      font-family: inherit;
+      font-family: var(--sans);
       outline: none;
-      transition: border-color 0.15s;
+      box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
       min-width: 0;
     }
-    input:focus { border-color: #7c3aed; }
-    input::placeholder { color: #3d3d5c; }
+
+    input:focus {
+      border-color: rgba(139, 92, 246, 0.4);
+      box-shadow:
+        inset 0 1px 3px rgba(0, 0, 0, 0.3),
+        0 0 0 3px var(--accent-dim);
+    }
+
+    input::placeholder { color: var(--text-3); }
 
     .toggle-vis {
       padding: 8px 12px;
-      background: transparent;
-      border: 1px solid #252540;
-      border-radius: 7px;
-      color: #64748b;
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-2);
       font-size: 11px;
-      font-family: inherit;
+      font-family: var(--sans);
+      font-weight: 500;
       cursor: pointer;
       white-space: nowrap;
-      transition: color 0.12s, border-color 0.12s;
+      transition: all 0.15s ease;
       flex-shrink: 0;
     }
-    .toggle-vis:hover { color: #a78bfa; border-color: #7c3aed; }
 
-    /* Save button */
+    .toggle-vis:hover {
+      color: var(--accent-hover);
+      border-color: var(--border-hover);
+      background: var(--bg-3);
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 1px 7px;
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-size: 11px;
+      color: var(--text-1);
+      font-family: var(--mono);
+    }
+
+    /* ── Save button ──────────────────────────────────── */
+
     .save-btn {
       padding: 10px 20px;
-      background: linear-gradient(135deg, #7c3aed, #4f46e5);
+      background: linear-gradient(135deg, var(--accent) 0%, #7149d1 100%);
       border: none;
-      border-radius: 8px;
+      border-radius: var(--radius-sm);
       color: #fff;
       font-size: 13px;
       font-weight: 600;
-      font-family: inherit;
+      font-family: var(--sans);
       cursor: pointer;
-      transition: opacity 0.15s, transform 0.1s;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
       align-self: flex-start;
-      box-shadow: 0 2px 12px rgba(124,58,237,0.35);
+      box-shadow: 0 1px 8px rgba(139, 92, 246, 0.2);
     }
-    .save-btn:hover { opacity: 0.88; transform: translateY(-1px); }
+
+    .save-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 16px rgba(139, 92, 246, 0.3);
+    }
+
     .save-btn:active { transform: translateY(0); }
 
-    /* Status message */
+    /* ── Status ───────────────────────────────────────── */
+
     #status {
       font-size: 12px;
       min-height: 18px;
-      transition: color 0.2s;
+      transition: color 0.15s ease;
     }
-    #status.ok    { color: #10b981; }
-    #status.error { color: #f87171; }
 
-    /* Info / link rows */
+    #status.ok { color: var(--success); }
+    #status.error { color: var(--error); }
+
+    /* ── Divider ──────────────────────────────────────── */
+
+    hr {
+      border: none;
+      border-top: 1px solid var(--border);
+    }
+
+    /* ── Info rows ────────────────────────────────────── */
+
     .info-row {
       display: flex;
       flex-direction: column;
       gap: 8px;
       font-size: 12px;
-      color: #64748b;
+      color: var(--text-2);
       line-height: 1.6;
     }
 
     a {
-      color: #a78bfa;
+      color: var(--accent-hover);
       text-decoration: none;
-    }
-    a:hover { text-decoration: underline; }
-
-    .tag {
-      display: inline-block;
-      padding: 1px 7px;
-      background: #1a1a2e;
-      border: 1px solid #252540;
-      border-radius: 4px;
-      font-size: 11px;
-      color: #94a3b8;
-      font-family: 'SF Mono', 'Fira Code', monospace;
+      transition: color 0.15s ease;
     }
 
-    /* Divider */
-    hr { border: none; border-top: 1px solid #1e1e3a; }
+    a:hover { color: var(--text-0); }
 
-    /* How it works section */
+    /* ── Steps ────────────────────────────────────────── */
+
     .steps {
       display: flex;
       flex-direction: column;
       gap: 10px;
       font-size: 12px;
-      color: #64748b;
+      color: var(--text-2);
       line-height: 1.6;
     }
+
     .step {
       display: flex;
-      gap: 10px;
+      gap: 12px;
       align-items: flex-start;
     }
+
     .step-num {
       flex-shrink: 0;
-      width: 20px;
-      height: 20px;
-      background: #1a1a2e;
-      border: 1px solid #252540;
-      border-radius: 50%;
-      font-size: 10px;
+      width: 22px;
+      height: 22px;
+      background: var(--accent-dim);
+      border: none;
+      border-radius: 6px;
+      font-size: 11px;
       font-weight: 700;
-      color: #a78bfa;
+      color: var(--accent-hover);
       display: flex;
       align-items: center;
       justify-content: center;
       margin-top: 1px;
+    }
+
+    /* ── Engine selector ──────────────────────────────── */
+
+    .engine-options {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .engine-option {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 12px 14px;
+      background: var(--bg-0);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      text-align: left;
+      font-family: var(--sans);
+      transition: all 0.15s ease;
+    }
+
+    .engine-option:hover {
+      border-color: var(--border-hover);
+      background: var(--bg-2);
+    }
+
+    .engine-option.active {
+      border-color: rgba(139, 92, 246, 0.4);
+      background: var(--accent-dim);
+      box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.08);
+    }
+
+    .engine-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-0);
+    }
+
+    .engine-option.active .engine-name {
+      color: var(--accent-hover);
+    }
+
+    .engine-desc {
+      font-size: 11px;
+      color: var(--text-2);
+      line-height: 1.5;
+    }
+
+    .step span { padding-top: 2px; }
+
+    .step strong {
+      color: var(--accent-hover);
+      font-weight: 600;
     }
   </style>
 </head>
@@ -213,25 +355,76 @@
 
     <!-- Header -->
     <div class="header">
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <defs>
-          <linearGradient id="og" x1="12" y1="2" x2="12" y2="22" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stop-color="#c4b5fd"/>
-            <stop offset="100%" stop-color="#7c3aed"/>
-          </linearGradient>
-        </defs>
-        <path d="M12 2C9.5 5.5 6 9.5 6 14a6 6 0 0012 0c0-4.5-3.5-8.5-6-12z" fill="url(#og)"/>
-        <path d="M12 8c-1.5 2.5-2.5 4.5-2.5 6a2.5 2.5 0 005 0c0-1.5-1-3.5-2.5-6z"
-              fill="white" opacity="0.45"/>
-      </svg>
-      <div>
-        <h1>Prompt Forge</h1>
-        <div class="version">Settings · v1.1.0</div>
+      <div class="header-logo">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <defs>
+            <linearGradient id="og" x1="12" y1="2" x2="12" y2="22" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#c4b5fd"/>
+              <stop offset="100%" stop-color="#8b5cf6"/>
+            </linearGradient>
+          </defs>
+          <path d="M12 2C9.5 5.5 6 9.5 6 14a6 6 0 0012 0c0-4.5-3.5-8.5-6-12z" fill="url(#og)"/>
+          <path d="M12 8c-1.5 2.5-2.5 4.5-2.5 6a2.5 2.5 0 005 0c0-1.5-1-3.5-2.5-6z"
+                fill="white" opacity="0.4"/>
+        </svg>
+        <div class="header-text">
+          <h1>Prompt Forge</h1>
+          <div class="header-meta">
+            <span class="label">Settings</span>
+            <span class="version-badge">v2.0.0</span>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- API Key card -->
+    <!-- Engine selector card -->
     <div class="card">
+      <div class="card-title">Optimization Engine</div>
+      <label>
+        How should Prompt Forge optimize your prompts?
+        <div class="engine-options" id="engineOptions">
+          <button class="engine-option active" data-engine="claude" type="button">
+            <span class="engine-name">Claude API — Recommended</span>
+            <span class="engine-desc">Uses Claude Sonnet via the Anthropic API. Best quality — Claude knows what works best for itself. Requires API key. No chat pollution.</span>
+          </button>
+          <button class="engine-option" data-engine="groq" type="button">
+            <span class="engine-name">Groq (Free Tier)</span>
+            <span class="engine-desc">Uses Llama 3.3 70B via Groq. Free API key. Lower quality results but costs nothing.</span>
+          </button>
+        </div>
+      </label>
+    </div>
+
+    <!-- Anthropic API Key card -->
+    <div class="card" id="claudeCard">
+      <div class="card-title">Anthropic API Key</div>
+
+      <label>
+        API Key
+        <span class="field-desc">
+          Used to call <span class="tag">claude-sonnet-4</span> for prompt optimization.
+          Stored locally — never sent anywhere except Anthropic's API.
+        </span>
+        <div class="input-row">
+          <input type="password" id="anthropicKeyInput" placeholder="sk-ant-..." autocomplete="off" spellcheck="false"/>
+          <button class="toggle-vis" id="toggleAnthropicVis" type="button">Show</button>
+        </div>
+      </label>
+
+      <button class="save-btn" id="saveAnthropicBtn" type="button">Save Key</button>
+      <div id="anthropicStatus"></div>
+
+      <hr>
+
+      <div class="info-row">
+        <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">
+          Get an API key at console.anthropic.com &rarr;
+        </a>
+      </div>
+    </div>
+
+    <!-- Groq API Key card -->
+    <div class="card" id="groqCard" style="display:none">
       <div class="card-title">Groq API Key</div>
 
       <label>
@@ -242,7 +435,7 @@
           anywhere except Groq's API.
         </span>
         <div class="input-row">
-          <input type="password" id="apiKeyInput" placeholder="gsk_…" autocomplete="off" spellcheck="false"/>
+          <input type="password" id="apiKeyInput" placeholder="gsk_..." autocomplete="off" spellcheck="false"/>
           <button class="toggle-vis" id="toggleVis" type="button">Show</button>
         </div>
       </label>
@@ -253,9 +446,9 @@
       <hr>
 
       <div class="info-row">
-        <span>🆓 Groq has a generous free tier — no credit card needed to start.</span>
+        <span>Groq has a generous free tier — no credit card needed to start.</span>
         <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer">
-          Get a free API key at console.groq.com →
+          Get a free API key at console.groq.com &rarr;
         </a>
       </div>
     </div>
@@ -270,7 +463,7 @@
         </div>
         <div class="step">
           <div class="step-num">2</div>
-          <span>An <strong style="color:#c4b5fd">⚡ Optimize</strong> button appears next to the Send button</span>
+          <span>An <strong>Optimize</strong> button appears next to the Send button</span>
         </div>
         <div class="step">
           <div class="step-num">3</div>
@@ -278,11 +471,11 @@
         </div>
         <div class="step">
           <div class="step-num">4</div>
-          <span>It fetches relevant example prompts from prompts.chat, then calls Groq to rewrite yours</span>
+          <span>It searches proven patterns from prompts.chat, GitHub, and built-in libraries, then calls Groq to rewrite yours as an AI-optimized XML prompt</span>
         </div>
         <div class="step">
           <div class="step-num">5</div>
-          <span>The improved prompt is placed back in the chat box, ready to review and send</span>
+          <span>The optimized prompt is placed back in the chat box — with XML tags, MUST/NEVER rules, and positive+negative examples</span>
         </div>
       </div>
     </div>
@@ -292,7 +485,7 @@
       <div class="card-title">Popup (any site)</div>
       <div class="info-row">
         Click the Prompt Forge toolbar icon on any page to open the standalone popup.
-        It searches prompts.chat directly and shows the best matching curated prompt —
+        It searches prompts.chat, GitHub's awesome-chatgpt-prompts, and built-in proven patterns —
         no API key required for this mode.
       </div>
     </div>

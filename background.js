@@ -4,228 +4,142 @@
 
 'use strict';
 
-const API_BASE   = 'https://prompts.chat/api';
-const GROQ_API   = 'https://api.groq.com/openai/v1/chat/completions';
+const DEBUG = false;
+const log = (...args) => { if (DEBUG) console.log('[PromptForge]', ...args); };
 
-// Three-agent pipeline models
-const GROQ_PRUNER_MODEL    = 'llama-3.1-8b-instant';   // Agent 1, Agent 4 — fast/cheap
-const GROQ_OPTIMIZER_MODEL = 'llama-3.3-70b-versatile'; // Agent 2 (A+B), Agent 3, chain
-const GROQ_DIVERSITY_MODEL = 'gemma2-9b-it';            // Agent 2 (C) — different architecture for variety
+const API_BASE      = 'https://prompts.chat/api';
+const GROQ_API      = 'https://api.groq.com/openai/v1/chat/completions';
+const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
 
-/* ── Domain-matched few-shot examples ────────────────────────────────── */
-// Agent 1 classifies the conversation into one of these domains.
-// Agent 2 receives the matching example so its few-shot anchor is on-topic.
+// Pipeline models
+const GROQ_PRUNER_MODEL    = 'llama-3.1-8b-instant';   // Trajectory, strategy doc, system prompt gen
+const GROQ_OPTIMIZER_MODEL = 'llama-3.3-70b-versatile'; // Main optimizer
 
-const DOMAIN_EXAMPLES = {
-  code: {
-    input:  'review my code',
-    output: '## ROLE\nYou are a senior software engineer with 10 years experience in code review and debugging.\n\n## CONTEXT\nDomain: code. User submitted code for review — scope covers correctness, performance bottlenecks, and readability.\n\n## TASK\n1. Identify the top 3 issues ranked by severity: bugs, performance problems, readability\n2. For each issue: state the problem, explain the impact, show the exact fix\n\n## OUTPUT FORMAT\n<numbered-list>\nIssue → Impact → Exact fix (highest severity first)\n</numbered-list>',
-    exemplar: {
-      input:  'def load(path): data = open(path).read(); return json.loads(data)',
-      output: '1. [HIGH] File handle never closed — memory leak on large files. Fix: use `with open(path) as f: data = f.read()`.\n2. [MEDIUM] No error handling — raises JSONDecodeError on bad input. Fix: wrap in try/except json.JSONDecodeError.\n3. [LOW] Missing type hints. Fix: def load(path: str) -> dict:',
-    },
-  },
-  writing: {
-    input:  'make this better',
-    output: '## ROLE\nYou are a professional editor with 15 years experience in business and technical writing.\n\n## CONTEXT\nDomain: writing. User wants their text improved for clarity and concision — all key points must be preserved.\n\n## TASK\n1. Rewrite the provided text to be 30% shorter and 50% clearer\n2. Preserve every key point from the original\n\n## OUTPUT FORMAT\n<prose>\nRewritten version only — no commentary, no before/after labels\n</prose>',
-    exemplar: {
-      input:  'We are very excited to announce that we will be launching our new product next month.',
-      output: 'Our new product launches next month.',
-    },
-  },
-  data: {
-    input:  'what does this data mean',
-    output: '## ROLE\nYou are a senior data analyst with 10 years experience in business intelligence and data storytelling.\n\n## CONTEXT\nDomain: data. User provided a dataset and wants actionable business insights extracted from its patterns.\n\n## TASK\n1. Identify the 3 most significant patterns in the data\n2. For each: explain the business implication and recommend one concrete action\n\n## OUTPUT FORMAT\n<structured-list>\nPattern → Business implication → Recommended action\n</structured-list>',
-    exemplar: {
-      input:  'Q1 revenue: $2.1M, Q2: $1.8M, Q3: $2.6M, Q4: $3.1M. Support tickets: Q1 340, Q2 290, Q3 410, Q4 480.',
-      output: 'Pattern 1: Revenue +48% Q2→Q4 → Strong growth → Action: increase sales headcount 20% before Q1.\nPattern 2: Tickets track revenue (+41% Q3-Q4) → Scaling strain → Action: hire 2 support agents before Q4.\nPattern 3: Q2 dip despite low tickets → Seasonal demand, not quality → Action: run Q2 promotions annually.',
-    },
-  },
-  creative: {
-    input:  'help with my story',
-    output: '## ROLE\nYou are a fiction editor with 10 years experience in narrative structure and tension-building.\n\n## CONTEXT\nDomain: creative writing. User submitted a story passage that needs tension and stakes improved.\n\n## TASK\n1. Identify the specific sentence or paragraph where tension drops\n2. Rewrite that section to raise the stakes\n3. Append one sentence explaining the structural change made\n\n## OUTPUT FORMAT\n<prose>\nRewritten passage, followed by [Structural change: one-sentence explanation in brackets]\n</prose>',
-    exemplar: {
-      input:  'John walked into the bar. He felt nervous. He sat down and ordered a drink.',
-      output: 'John\'s hand found the door before he was ready. Inside: same stools, same spilled-lager smell — and her, three seats from the end, watching him in the mirror.\n\n[Structural change: replaced flat exposition with immediate sensory conflict and stakes.]',
-    },
-  },
-  research: {
-    input:  'explain this concept',
-    output: '## ROLE\nYou are a university professor with 15 years experience making complex ideas accessible to diverse audiences.\n\n## CONTEXT\nDomain: research/education. User wants a concept explained at three distinct levels of expertise.\n\n## TASK\n1. Write one sentence for a 10-year-old\n2. Write three bullet points for a professional\n3. Give one concrete real-world example\n\n## OUTPUT FORMAT\n<layered-explanation>\n10-year-old: [one sentence]\nProfessional: [three bullets]\nExample: [real-world case]\n</layered-explanation>',
-    exemplar: {
-      input:  'What is gradient descent?',
-      output: '10-year-old: Imagine rolling a ball down a bumpy hill — gradient descent always rolls downhill to find the lowest point.\nProfessional: • Computes loss gradient w.r.t. parameters • Subtracts learning_rate × gradient each step • Repeats until convergence\nReal-world: Training a spam filter — after each email batch, weights shift slightly so the next prediction is slightly more accurate.',
-    },
-  },
-  generic: {
-    input:  'what is the optimal food stack',
-    output: '## ROLE\nYou are a registered dietitian with 15 years experience in sports nutrition and evidence-based meal planning.\n\n## CONTEXT\nDomain: health/nutrition. User wants ranked, evidence-based food recommendations for optimal overall health.\n\n## TASK\n1. Rank the top 5 most nutrient-dense food combinations for overall health\n2. For each: name it, explain the benefit, state the recommended portion size\n\n## OUTPUT FORMAT\n<numbered-list>\nCombination → Benefit → Portion (highest health impact first)\n</numbered-list>',
-    exemplar: {
-      input:  'What should I eat for sustained energy throughout the day?',
-      output: '1. Oats + blueberries — slow-release glucose + antioxidants → 4-hour plateau. Portion: 1 cup oats, ½ cup berries.\n2. Eggs + spinach — complete protein + iron → sustained focus. Portion: 2 eggs, 2 cups spinach.\n3. Salmon + sweet potato — omega-3 + complex carbs → brain + muscle fuel. Portion: 4oz + 1 medium.\n4. Greek yogurt + almonds — protein + fat → 3-4hr satiety. Portion: 6oz + 1oz.\n5. Lentils + brown rice — complete amino acids → stable glucose. Portion: ½ cup each.',
-    },
-  },
-};
+/* ── Curated prompt library (local + remote updates) ───────────────────── */
+// Loads from prompts-library.json bundled with the extension.
+// Also checks a remote URL for updates (e.g., GitHub raw) every 24 hours.
+// Remote prompts are cached in chrome.storage.local.
 
-/* ── Mode instructions injected into Agent 2's system prompt ─────────── */
-// Each mode adds a style constraint that Agent 2 bakes INTO the rewritten prompt.
-// When the user submits the optimized prompt to Claude, Claude responds in that style.
-// 'guided' uses the intent panel for extra context — pipeline runs like 'auto'.
-// 'chain'  is handled post-merge — produces a 2-step priming + main prompt sequence.
+let _curatedLibrary = null;
+let _curatedLibraryLoaded = false;
+const CURATED_CACHE_TTL = 1000 * 60 * 60 * 24; // 24 hours
 
-const MODE_INSTRUCTIONS = {
-  auto:     '',
-  learn:    'explain step-by-step with concrete examples, use analogies for complex ideas, and end with a one-sentence comprehension check',
-  // Brief: positive-framing only — every directive states what TO do, never what to avoid.
-  brief:    'write exactly 3 bullet points, open each bullet with an active verb, place the single most actionable insight first, keep each bullet to one sentence',
-  // Deep: Chain-of-Thought cueing — forces Claude to externalise 8-12 reasoning steps.
-  deep:     'think step-by-step: before answering, number and label 8 to 12 explicit reasoning steps, state assumptions at step 1, surface edge cases by step 6, then give the final answer on a new line',
-  guided:   '',
-  // Creative: semantic drift — Claude should prioritise novelty over convention.
-  creative: 'approach this from an unexpected angle, use vivid and original language, favour surprising framings over safe ones, prioritise novelty',
-  chain:    '',
-};
+async function loadCuratedLibrary() {
+  if (_curatedLibrary && _curatedLibraryLoaded) return _curatedLibrary;
 
-/* ── Per-optimizer sampling parameters for Agent 2 ×3 ───────────────── */
-// default: base diversity profile — three genuinely distinct strategies.
-//   Optimizer 1 (Conservative): temperature 0.0 + top_p 0.1  → near-deterministic,
-//     nucleus capped to the top 10% of probability mass. Maximum precision.
-//   Optimizer 2 (Creative):     temperature 0.8 + top_p 0.9  → high entropy,
-//     broad vocabulary sampling. Strong semantic drift from conservative.
-//   Optimizer 3 (Diverse):      temperature 1.0 + top_k 40   → full entropy,
-//     hard-capped at 40 tokens per step. Different distribution shape from top_p.
-//
-// Mode overrides: change temperature only — top_p / top_k carry through from default
-// so each optimizer retains its structural identity even under mode constraints.
+  // Try cached remote version first
+  try {
+    const { pfCuratedPrompts, pfCuratedTimestamp } = await chrome.storage.local.get(['pfCuratedPrompts', 'pfCuratedTimestamp']);
+    if (pfCuratedPrompts && pfCuratedTimestamp && Date.now() - pfCuratedTimestamp < CURATED_CACHE_TTL) {
+      _curatedLibrary = pfCuratedPrompts;
+      _curatedLibraryLoaded = true;
+      log('Curated library loaded from cache:', _curatedLibrary.length, 'prompts');
+      return _curatedLibrary;
+    }
+  } catch {}
 
-const AGENT2_PARAMS = {
-  default: [
-    { temperature: 0.0, top_p: 0.1 },  // Optimizer 1 — Conservative
-    { temperature: 0.8, top_p: 0.9 },  // Optimizer 2 — Creative
-    { temperature: 1.0, top_p: 0.8, top_k: 40 },  // Optimizer 3 — Diverse
-  ],
-  deep:     [{ temperature: 0.1 }, { temperature: 0.1  }, { temperature: 0.1  }],
-  creative: [{ temperature: 0.9 }, { temperature: 0.95 }, { temperature: 0.85 }],
-  brief:    [{ temperature: 0.4 }, { temperature: 0.6  }, { temperature: 0.5  }],
-};
+  // Load local bundled file
+  try {
+    const localUrl = chrome.runtime.getURL('prompts-library.json');
+    const res = await fetch(localUrl);
+    if (res.ok) {
+      const data = await res.json();
+      _curatedLibrary = data.prompts || [];
+      _curatedLibraryLoaded = true;
+      log('Curated library loaded from bundle:', _curatedLibrary.length, 'prompts');
+    }
+  } catch (err) {
+    console.warn('[PromptForge] Failed to load local curated library:', err.message);
+    _curatedLibrary = [];
+    _curatedLibraryLoaded = true;
+  }
 
-/* ── Agent 2 system prompt builder ───────────────────────────────────── */
-// Returns the optimizer system message. When prompts.chat examples are
-// available they are appended as reference for picking the right expert role
-// and tone — but the core persona-inferring instruction is always the same.
+  // Try remote update in the background (non-blocking)
+  fetchRemoteCuratedLibrary().catch(() => {});
 
-// Mode-specific instructions to the OPTIMIZER itself (how to write the rewritten prompt).
-// These are distinct from MODE_INSTRUCTIONS, which are constraints baked INTO the output
-// prompt for Claude to follow. These guide the rewriting strategy.
-const MODE_OPTIMIZER_HINTS = {
-  deep: `\
-DEEP MODE — CHAIN-OF-THOUGHT REWRITING:
-The rewritten prompt MUST explicitly cue chain-of-thought reasoning. Bake in a numbered-steps instruction (8–12 steps) as the final constraint line. Prioritise precision over variety — every word must be unambiguous. Use temperature-appropriate language: no hedges, no "maybe", no "if applicable".`,
-
-  creative: `\
-CREATIVE MODE — SEMANTIC DRIFT REQUIRED:
-Your rewrite must depart significantly from the original prompt's phrasing and framing. Do NOT preserve the original verbs, nouns, or structure. Reframe the task from an unexpected angle. If the original says "review my code", do NOT use "review" — try "Dissect", "Autopsy", "Pressure-test". Maximise novelty. The <example> Output must also demonstrate a surprising, non-obvious response style.`,
-
-  brief: `\
-BRIEF MODE — POSITIVE INSTRUCTION FRAMING ONLY:
-Every line of the rewritten prompt must use positive directives (state what TO do). Never use "don't", "avoid", "no", "without", or any negative construction. Replace "don't be wordy" with "use one sentence per point". Replace "no preamble" with "open with the answer". The <example> Output must itself be tightly constrained — 3 bullets or fewer.`,
-};
-
-function buildOptimizerSystemMsg(domain, mode, examples, patternNotes, taskType = 'knowledge') {
-  const ex = DOMAIN_EXAMPLES[domain] || DOMAIN_EXAMPLES.generic;
-  const modeInstruction   = MODE_INSTRUCTIONS[mode]      || '';
-  const modeOptimizerHint = MODE_OPTIMIZER_HINTS[mode]   || '';
-
-  // Task-type hint: injected when Agent 1 classifies the task as reasoning- or knowledge-bound.
-  // Research shows CoT dramatically improves logic/code tasks; knowledge tasks benefit more
-  // from context clarity than instruction expansion.
-  const taskTypeHint = taskType === 'reasoning'
-    ? `TASK TYPE: reasoning-bound
-→ ## TASK MUST include a "think step-by-step through 8–12 numbered reasoning steps" instruction.
-→ The <example> Output must demonstrate numbered step-by-step reasoning, not a direct answer.`
-    : `TASK TYPE: knowledge-bound
-→ Prioritise context precision in ## CONTEXT — keep only facts directly required by ## TASK.
-→ Do NOT expand ## TASK with extra instructions; retrieval clarity outweighs instruction complexity on factual tasks.`;
-
-  const core = `\
-⚠️ CRITICAL — READ BEFORE ANYTHING ELSE:
-You are a PROMPT REWRITER + EXEMPLAR GENERATOR. You do NOT answer questions. You do NOT give advice.
-Your ONLY job: (1) rewrite the rough prompt as a better prompt, (2) write one sample input-output pair.
-If you find yourself answering the prompt, STOP — rewrite the prompt itself instead.
-
-${taskTypeHint}
-${modeOptimizerHint ? `\n${modeOptimizerHint}\n` : ''}
-OUTPUT FORMAT — return EXACTLY this 4-block structure, nothing else:
-
-## ROLE
-You are a [specific role] with [X] years experience in [exact domain/technology].
-
-## CONTEXT
-[2-3 sentences: domain, key facts from TASK/CONTEXT/TECH fields, what a perfect response accomplishes — use verbatim names/errors/versions from context, never generalise]
-
-## TASK
-1. [primary instruction — verb-driven: List / Rank / Identify / Write / Explain / Compare / Debug / Review / Generate / Summarize]
-2. [secondary constraint: scope limit, comparison axis, or quality rule]
-3. [tertiary constraint]${modeInstruction ? `\n4. "${modeInstruction}."` : ''}
-
-## OUTPUT FORMAT
-<[tag]>
-[format specification — e.g. Issue → Impact → Fix / JSON schema / column layout]
-</[tag]>
-
-Choose [tag] from: bullets · numbered-list · json · table · code-block · prose · structured-list · layered-explanation
-
-<example>
-Input: [a realistic user message this rewritten prompt would receive]
-Output: [the ideal expert response — uses the exact tag format above, specific, 3-8 lines]
-</example>
-
-JOINT OPTIMIZATION — instructions and <example> form a single program:
-The tone and constraints in ## TASK MUST be strictly demonstrated by the <example> Output.
-If ## TASK says "be concise"        → <example> Output must be ≤ 3 lines.
-If ## TASK says "think step-by-step" → <example> Output must show numbered steps.
-If ## TASK says "use a table"        → <example> Output must be a markdown table.
-Mismatched instruction/example is an invalid output — treat it like a syntax error.
-
-HOW TO USE CONTEXT:
-The user message includes structured context fields (TASK, CONTEXT, TECH, etc.) and the last Claude response.
-EVIDENCE (verbatim from conversation): if present, this is the single most specific piece of raw evidence — an exact error message, exact function name, or exact code fragment copied verbatim from the chat. It MUST appear quoted in ## CONTEXT. Do not paraphrase it. Do not generalise it.
-Every specific detail — exact file names, error messages, variable names, technologies, versions — MUST appear in ## CONTEXT.
-The <example> Input/Output must also reflect these specifics, not generic placeholders.
-
-WRONG: "## CONTEXT\nDomain: code. User wants code reviewed." (too vague — ignores specifics)
-RIGHT: "## CONTEXT\nDomain: code. User is debugging process_dataframe() on 512MB AWS Lambda — runtime exceeds 45s. Previously tried increasing memory with no improvement."
-EVIDENCE WRONG: paraphrasing 'MemoryError on line 42' as 'a runtime error'
-EVIDENCE RIGHT: quoting it directly — "raises MemoryError on line 42"
-
-NEVER: omit ## ROLE · use 'Determine' or 'Analyze' as first task verb · exceed 4 numbered items in ## TASK · omit XML tag in ## OUTPUT FORMAT · write generic ## CONTEXT when specifics are available · paraphrase EVIDENCE
-
-DOMAIN EXAMPLE — input: '${ex.input}'
-DOMAIN EXAMPLE — output:
-${ex.output}
-
-<example>
-Input: ${ex.exemplar.input}
-Output: ${ex.exemplar.output}
-</example>
-
-Return EXACTLY: the 4-block prompt (## ROLE / ## CONTEXT / ## TASK / ## OUTPUT FORMAT) followed by one <example> block. No preamble, no explanation.`;
-
-  if (examples.length === 0) return core;
-
-  const exampleBlock = examples
-    .map((ex, i) => `[EXAMPLE ${i + 1}]: ${ex.title}\n${ex.content.slice(0, 500)}`)
-    .join('\n\n');
-  const patternsLine = patternNotes.length > 0
-    ? `\nThese examples use: ${patternNotes.join(', ')}.\n`
-    : '';
-
-  return `${core}
-
-Use these ${examples.length} reference prompts from prompts.chat to inform the right expert role and output style:
-
-${exampleBlock}${patternsLine}`;
+  return _curatedLibrary;
 }
+
+async function fetchRemoteCuratedLibrary() {
+  // Check if a remote URL is configured
+  const { pfCuratedRemoteUrl } = await chrome.storage.local.get('pfCuratedRemoteUrl');
+  if (!pfCuratedRemoteUrl) return;
+
+  try {
+    const res = await fetch(pfCuratedRemoteUrl, { headers: { Accept: 'application/json' } });
+    if (!res.ok) return;
+    const data = await res.json();
+    const prompts = data.prompts || [];
+    if (prompts.length > 0) {
+      await chrome.storage.local.set({ pfCuratedPrompts: prompts, pfCuratedTimestamp: Date.now() });
+      _curatedLibrary = prompts;
+      log('Curated library updated from remote:', prompts.length, 'prompts');
+    }
+  } catch {}
+}
+
+// Search curated library by domain + keywords
+function searchCuratedLibrary(query, domain, limit = 3) {
+  if (!_curatedLibrary || _curatedLibrary.length === 0) return [];
+  const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+
+  return _curatedLibrary
+    .map(p => {
+      let score = 0;
+      if (domain && p.domain === domain) score += 5;
+      const text = `${p.title} ${p.prompt} ${p.why || ''}`.toLowerCase();
+      score += queryWords.reduce((s, w) => s + (text.includes(w) ? 1 : 0), 0);
+      return score > 0 ? { ...p, _score: score } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => b._score - a._score)
+    .slice(0, limit);
+}
+
+/* ── Built-in fallback patterns (used when curated library unavailable) ── */
+
+const PROVEN_PATTERNS = [
+  {
+    id: 'pp-1', title: 'Expert Code Reviewer',
+    content: '<role>senior eng|code review+security+perf</role>\n<ctx>code review|severity ranked|exact fixes required</ctx>\n<task>\n- scan for bugs, security holes, perf issues\n- rank by severity: CRITICAL>HIGH>MED>LOW\n- per issue: problem→impact→exact fix(code)\n</task>\n<rules>\nMUST: show working code fix\nMUST: explain WHY it\'s a problem not just WHAT\nNEVER: say "looks good" without evidence\nNEVER: suggest cosmetic changes before fixing bugs\n</rules>\n<fmt>numbered|[severity]→issue→impact→fix</fmt>',
+    category: 'coding',
+  },
+  {
+    id: 'pp-2', title: 'Chain-of-Thought Reasoning',
+    content: '<role>analytical reasoning specialist</role>\n<ctx>complex question requiring multi-step reasoning</ctx>\n<task>\n- state all assumptions first\n- reason through numbered steps (show work)\n- identify edge cases at each step\n- verify conclusion against assumptions\n- state confidence + what would change answer\n</task>\n<rules>\nMUST: show every reasoning step\nMUST: flag uncertainty explicitly\nNEVER: jump to conclusion\nNEVER: hide assumptions\n</rules>\n<fmt>steps→verification→conclusion(confidence%)</fmt>',
+    category: 'reasoning',
+  },
+  {
+    id: 'pp-3', title: 'Concise Technical Writer',
+    content: '<role>technical writer|API docs+developer guides</role>\n<ctx>documentation|audience=developers|clarity>completeness</ctx>\n<task>\n- explain concept in 1 sentence\n- show minimal working example\n- list 3 common pitfalls\n</task>\n<rules>\nMUST: lead with working code example\nMUST: every sentence adds information\nNEVER: use filler phrases ("In this section we will...")\nNEVER: explain obvious code line-by-line\n</rules>\n<fmt>sentence→code_block→pitfalls_list</fmt>',
+    category: 'writing',
+  },
+  {
+    id: 'pp-4', title: 'Data Insight Extractor',
+    content: '<role>data analyst|BI+statistical analysis</role>\n<ctx>dataset analysis|extract actionable insights|numbers required</ctx>\n<task>\n- identify top 3 patterns by business impact\n- per pattern: insight+supporting numbers+one action\n- flag data quality issues found\n</task>\n<rules>\nMUST: cite specific numbers from data\nMUST: tie every insight to an action\nNEVER: state obvious trends without adding insight\nNEVER: recommend without data evidence\n</rules>\n<fmt>pattern→numbers→insight→action</fmt>',
+    category: 'analysis',
+  },
+  {
+    id: 'pp-5', title: 'Socratic Teacher',
+    content: '<role>educator|adaptive explanation+scaffolded learning</role>\n<ctx>concept explanation|gauge understanding first|build on learner knowledge</ctx>\n<task>\n- ask ONE diagnostic question to gauge level\n- explain at right level based on response\n- use concrete analogy from learner domain\n- end with comprehension check\n</task>\n<rules>\nMUST: adapt complexity to demonstrated understanding\nMUST: use domain-specific analogies not generic\nNEVER: lecture without checking comprehension\nNEVER: use jargon without defining first\n</rules>\n<fmt>question→explanation(adapted)→analogy→check</fmt>',
+    category: 'education',
+  },
+  {
+    id: 'pp-6', title: 'Creative Reframer',
+    content: '<role>creative director|lateral thinking+reframing</role>\n<ctx>creative task|novelty>convention|surprise the reader</ctx>\n<task>\n- identify the conventional approach\n- deliberately break one assumption\n- rebuild from the broken assumption\n- explain why unconventional angle works better\n</task>\n<rules>\nMUST: name the assumption being broken\nMUST: result must be more effective not just different\nNEVER: be weird for weirdness sake\nNEVER: use clichéd creative framings\n</rules>\n<fmt>conventional→broken_assumption→rebuilt→why_better</fmt>',
+    category: 'creative',
+  },
+  {
+    id: 'pp-7', title: 'Decision Framework Builder',
+    content: '<role>strategy consultant|decision analysis+trade-off evaluation</role>\n<ctx>decision with multiple options|structured comparison|risk-aware</ctx>\n<task>\n- define evaluation criteria (max 5)\n- score each option against criteria\n- identify deal-breakers and hidden risks\n- recommend with stated assumptions\n</task>\n<rules>\nMUST: make trade-offs explicit not hidden\nMUST: state what would change the recommendation\nNEVER: recommend without showing trade-offs\nNEVER: present one option as obviously best without evidence\n</rules>\n<fmt>criteria_matrix→risks→recommendation(assumptions)</fmt>',
+    category: 'business',
+  },
+  {
+    id: 'pp-8', title: 'Debugging Systematizer',
+    content: '<role>senior debugger|root cause analysis+systematic elimination</role>\n<ctx>bug report|systematic diagnosis|exact reproduction required</ctx>\n<task>\n- form 3 hypotheses ranked by likelihood\n- per hypothesis: test to confirm/eliminate (exact command/code)\n- narrow to root cause through elimination\n- provide exact fix with verification step\n</task>\n<rules>\nMUST: test hypotheses in order of likelihood\nMUST: provide exact commands not vague "check the logs"\nNEVER: suggest random fixes without diagnosis\nNEVER: skip reproduction step\n</rules>\n<fmt>hypotheses→tests→elimination→root_cause→fix→verify</fmt>',
+    category: 'coding',
+  },
+];
 
 /* ── Normalise prompt objects from different API shapes ── */
 
@@ -339,12 +253,154 @@ async function searchPromptsMCP(query, limit = 5) {
   return [];
 }
 
+/* ── GitHub awesome-chatgpt-prompts source ─────────── */
+
+let _ghPromptsCache = null;
+let _ghPromptsCacheTime = 0;
+const GH_CACHE_TTL = 1000 * 60 * 60 * 6; // 6 hours — the CSV rarely changes
+
+async function searchPromptsGitHub(query, limit = 5) {
+  const CSV_URL = 'https://raw.githubusercontent.com/f/awesome-chatgpt-prompts/main/prompts.csv';
+
+  // Use cached data if fresh
+  if (_ghPromptsCache && Date.now() - _ghPromptsCacheTime < GH_CACHE_TTL) {
+    return matchGitHubPrompts(_ghPromptsCache, query, limit);
+  }
+
+  const res = await fetch(CSV_URL, { headers: { Accept: 'text/plain' } });
+  if (!res.ok) throw new Error(`GitHub responded with ${res.status}`);
+
+  const csv = await res.text();
+  const parsed = parseCSV(csv);
+
+  _ghPromptsCache = parsed;
+  _ghPromptsCacheTime = Date.now();
+  log(`GitHub prompts cached: ${parsed.length} entries`);
+
+  return matchGitHubPrompts(parsed, query, limit);
+}
+
+// Proper CSV parser that handles multi-line quoted fields, escaped quotes (""), and mixed quoting.
+// Extracts columns 0 (act/title) and 1 (prompt/content) from the awesome-chatgpt-prompts CSV.
+function parseCSV(csv) {
+  const results = [];
+  const len = csv.length;
+  let i = 0;
+
+  // Skip header line
+  while (i < len && csv[i] !== '\n') i++;
+  i++; // past '\n'
+
+  while (i < len) {
+    const row = [];
+    // Parse up to 2 columns (we only need act + prompt), skip the rest of the line
+    for (let col = 0; col < 2 && i < len; col++) {
+      if (col > 0) {
+        if (i < len && csv[i] === ',') i++; // skip comma between fields
+        else break;
+      }
+      if (csv[i] === '"') {
+        // Quoted field — handles multi-line content and escaped quotes ("")
+        i++; // skip opening quote
+        let val = '';
+        while (i < len) {
+          if (csv[i] === '"') {
+            if (i + 1 < len && csv[i + 1] === '"') {
+              val += '"'; // escaped quote
+              i += 2;
+            } else {
+              i++; // closing quote
+              break;
+            }
+          } else {
+            val += csv[i];
+            i++;
+          }
+        }
+        row.push(val);
+      } else {
+        // Unquoted field — read until comma or newline
+        let val = '';
+        while (i < len && csv[i] !== ',' && csv[i] !== '\n' && csv[i] !== '\r') {
+          val += csv[i];
+          i++;
+        }
+        row.push(val);
+      }
+    }
+    // Skip remaining columns until end of line
+    // Handle quoted fields in remaining columns so we don't break on embedded newlines
+    while (i < len && csv[i] !== '\n') {
+      if (csv[i] === '"') {
+        i++; // skip opening quote
+        while (i < len) {
+          if (csv[i] === '"') {
+            if (i + 1 < len && csv[i + 1] === '"') { i += 2; }
+            else { i++; break; }
+          } else { i++; }
+        }
+      } else {
+        i++;
+      }
+    }
+    if (i < len && csv[i] === '\n') i++;
+
+    const [title, content] = row;
+    if (title && content && content.length >= 20) {
+      results.push({ title: title.trim(), content: content.trim() });
+    }
+  }
+  return results;
+}
+
+function matchGitHubPrompts(prompts, query, limit) {
+  const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+
+  return prompts
+    .map(p => {
+      const text = `${p.title} ${p.content}`.toLowerCase();
+      const score = queryWords.reduce((s, w) => s + (text.includes(w) ? 1 : 0), 0);
+      return score > 0 ? { ...p, score } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(p => ({
+      id: `gh-${p.title.replace(/\s+/g, '-').toLowerCase().slice(0, 30)}`,
+      title: p.title,
+      content: p.content.trim(),
+      category: '',
+      url: null,
+    }));
+}
+
+/* ── Match built-in proven patterns by domain/keywords ── */
+
+function matchProvenPatterns(query, domain, limit = 3) {
+  const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+
+  // Score by: domain match (weight 3) + keyword match (weight 1)
+  return PROVEN_PATTERNS
+    .map(p => {
+      let score = 0;
+      if (domain && p.category && p.category.includes(domain)) score += 3;
+      const text = `${p.title} ${p.content}`.toLowerCase();
+      score += queryWords.reduce((s, w) => s + (text.includes(w) ? 1 : 0), 0);
+      return score > 0 ? { ...p, _score: score } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => b._score - a._score)
+    .slice(0, limit);
+}
+
 /* ── Deduplicate by content fingerprint ─────────────── */
 
 function dedup(prompts) {
   const seen = new Set();
   return prompts.filter(p => {
-    const key = p.content.slice(0, 80).toLowerCase().replace(/\s+/g, ' ');
+    const text = p.content || p.prompt || '';
+    if (!text) return false;
+    const key = text.slice(0, 80).toLowerCase().replace(/\s+/g, ' ');
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -388,7 +444,7 @@ function extractKeywords(prompt, chatHistory) {
     .map(([w]) => w)
     .join(' ');
 
-  console.log('[PromptForge] Extracted keywords for prompts.chat search:', keywords);
+  log('Extracted keywords for prompts.chat search:', keywords);
   return keywords || prompt.slice(0, 60); // never send an empty query
 }
 
@@ -399,20 +455,40 @@ function extractKeywords(prompt, chatHistory) {
 function analyzePatterns(prompts) {
   const all = prompts.map(p => p.content);
   const match = (re) => all.some(c => re.test(c));
+  const countMatch = (re) => all.filter(c => re.test(c)).length;
 
   const notes = [];
-  if (match(/\byou are\b|\bact as\b|\byour role is\b/i))
-    notes.push('role assignment ("You are an expert…")');
-  if (match(/\bformat\b|\brespond in\b|\boutput\b|\bstructured\b|\blist\b/i))
+
+  // Core structural patterns
+  if (match(/\byou are\b|\bact as\b|\byour role is\b|<role>/i))
+    notes.push('role assignment');
+  if (match(/\bformat\b|\brespond in\b|\boutput\b|\bstructured\b|\blist\b|<fmt>/i))
     notes.push('structured output format');
-  if (match(/\brules?:\b|\bconstraints?:\b|\bdo not\b|\bmust not\b|\balways\b/i))
-    notes.push('explicit rules / constraints');
+  if (match(/\brules?:\b|\bconstraints?:\b|\bdo not\b|\bmust not\b|\balways\b|\bMUST:\b|\bNEVER:\b|<rules>/i))
+    notes.push('explicit MUST/NEVER constraints');
   if (match(/\{[^}]+\}|\[YOUR [A-Z]/))
     notes.push('placeholder variables');
   if (match(/\bstep[- ]by[- ]step\b|\bfirst[,.]?\s+then\b/i))
     notes.push('step-by-step instructions');
-  if (match(/\bexample[s:]|\bfor instance\b|\be\.g\.\b/i))
-    notes.push('worked examples');
+  if (match(/\bexample[s:]|\bfor instance\b|\be\.g\.\b|<ideal>|<wrong>/i))
+    notes.push('positive+negative examples');
+  if (match(/<role>|<ctx>|<task>|<rules>|<fmt>/i))
+    notes.push('XML-structured tags');
+
+  // Proven technique detection — stronger signals from community-validated patterns
+  const rolePlayCount = countMatch(/\byou are\b|\bact as\b|\byou will (?:act|serve|function) as\b|\bassume the role\b/i);
+  if (rolePlayCount >= 2)
+    notes.push(`STRONG: role-play framing (${rolePlayCount}/${all.length} references use "You are"/"Act as" — adopt this technique)`);
+
+  if (match(/\b\d+\.\s|(?:rule|constraint|requirement)\s*(?:#|\d)/i))
+    notes.push('STRONG: numbered constraints (proven to reduce instruction-skipping)');
+
+  const exampleCount = countMatch(/\b(?:input|output)\s*[:=]|\b(?:example|sample)\s*(?:input|output|response)\b|<in>.*<\/in>|<ideal>|user:\s.*\nassistant:/i);
+  if (exampleCount >= 1)
+    notes.push(`STRONG: input/output examples within prompt (${exampleCount}/${all.length} references include them — highly effective)`);
+
+  if (match(/\b(?:expert|senior|experienced|professional|specialist|10\+?\s*years?|veteran)\b.*?\b(?:in|with|at)\b/i))
+    notes.push('STRONG: persona with explicit expertise level (proven to improve response quality)');
 
   const avgLen = Math.round(all.reduce((s, c) => s + c.length, 0) / all.length);
   notes.push(`~${avgLen}-char length`);
@@ -426,19 +502,27 @@ async function handleOptimize({ prompt, category }) {
   // Build the search query (category prefix helps relevance)
   const query = [category, prompt].filter(Boolean).join(' ');
 
-  // Fire both APIs in parallel; treat each as optional
-  const [restSettled, mcpSettled] = await Promise.allSettled([
-    searchPromptsREST(query, 8),
+  // Fire all sources in parallel; treat each as optional
+  const [restSettled, mcpSettled, ghSettled] = await Promise.allSettled([
+    searchPromptsREST(query, 12),
     searchPromptsMCP(query, 5),
+    searchPromptsGitHub(query, 8),
   ]);
 
   let raw = [];
 
-  const fromREST = restSettled.status === 'fulfilled';
-  const fromMCP  = mcpSettled.status  === 'fulfilled';
+  const fromREST    = restSettled.status === 'fulfilled';
+  const fromMCP     = mcpSettled.status  === 'fulfilled';
+  const fromGitHub  = ghSettled.status   === 'fulfilled' && ghSettled.value.length > 0;
 
-  if (fromREST) raw.push(...restSettled.value);
-  if (fromMCP)  raw.push(...mcpSettled.value);
+  if (fromREST)   raw.push(...restSettled.value);
+  if (fromMCP)    raw.push(...mcpSettled.value);
+  if (fromGitHub) raw.push(...ghSettled.value);
+
+  // Always include relevant built-in proven patterns
+  const builtIn = matchProvenPatterns(query, category, 2);
+  const fromBuiltIn = builtIn.length > 0;
+  if (fromBuiltIn) raw.push(...builtIn);
 
   // If category narrowed things too much, broaden to plain prompt
   if (category && raw.length < 3) {
@@ -458,8 +542,8 @@ async function handleOptimize({ prompt, category }) {
   );
 
   if (prompts.length === 0) {
-    const apiNote = (!fromREST && !fromMCP)
-      ? ' (API may be unreachable — check your internet connection)'
+    const apiNote = (!fromREST && !fromMCP && !fromGitHub)
+      ? ' (APIs may be unreachable — check your internet connection)'
       : '';
     throw new Error(
       `No relevant prompts found for "${prompt.slice(0, 40)}".${apiNote} ` +
@@ -476,6 +560,8 @@ async function handleOptimize({ prompt, category }) {
     total:    prompts.length,
     fromREST,
     fromMCP,
+    fromGitHub,
+    fromBuiltIn,
   };
 }
 
@@ -485,23 +571,34 @@ async function handleOptimize({ prompt, category }) {
 // Supports any Groq-compatible field — typically top_p or top_k.
 // temperature is kept as a named param so all non-optimizer callers are unaffected.
 async function groqCall(apiKey, model, systemContent, userContent, maxTokens = 512, debugLabel = null, temperature = 0.7, extra = {}) {
-  const res = await fetch(GROQ_API, {
-    method:  'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type':  'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: systemContent },
-        { role: 'user',   content: userContent   },
-      ],
-      max_tokens:  maxTokens,
-      temperature,
-      ...extra,   // e.g. { top_p: 0.1 } or { top_k: 40 }
-    }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000); // 30s timeout
+  let res;
+  try {
+    res = await fetch(GROQ_API, {
+      signal: controller.signal,
+      method:  'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type':  'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemContent },
+          { role: 'user',   content: userContent   },
+        ],
+        max_tokens:  maxTokens,
+        temperature,
+        ...extra,   // e.g. { top_p: 0.1 } or { top_k: 40 }
+      }),
+    });
+  } catch (fetchErr) {
+    clearTimeout(timeout);
+    if (fetchErr.name === 'AbortError') throw new Error('Request timed out — try again');
+    throw fetchErr;
+  }
+  clearTimeout(timeout);
 
   if (!res.ok) {
     let msg = `Groq API error ${res.status}`;
@@ -517,9 +614,9 @@ async function groqCall(apiKey, model, systemContent, userContent, maxTokens = 5
   const json = await res.json();
   const text = json.choices?.[0]?.message?.content?.trim();
   if (debugLabel) {
-    console.log(`[${debugLabel} RAW response]:`, JSON.stringify(json));
-    console.log(`[${debugLabel} parsed output]:`, text);
-    console.log(`[${debugLabel} length]:`, text?.length);
+    log(`[${debugLabel} RAW response]:`, JSON.stringify(json));
+    log(`[${debugLabel} parsed output]:`, text);
+    log(`[${debugLabel} length]:`, text?.length);
   }
   if (!text) throw new Error('Groq returned an empty response');
   return text;
@@ -553,58 +650,13 @@ async function synthesizeStrategyDoc(apiKey, domain, rules) {
   );
 }
 
-/* ── Joint-Optimization cross-validator (post Agent 2) ───────────────── */
-// Checks that the <example> Output in each candidate strictly demonstrates
-// the constraints in ## TASK. If misaligned, the example is rewritten to match
-// before the candidate reaches the Merger — eliminating mixed-signal failures.
-
-async function crossValidateCandidate(apiKey, candidate) {
-  const systemMsg = [
-    'You are a Joint-Optimization validator. A prompt has a ## TASK block and an <example> block.',
-    'Check whether the <example> Output STRICTLY demonstrates every constraint stated in ## TASK.',
-    '',
-    'Mismatches to detect:',
-    '- ## TASK says "concise" / "3 bullets" / "one sentence" but <example> Output is verbose or multi-paragraph',
-    '- ## TASK says "think step-by-step" / "numbered reasoning" but <example> Output jumps to a direct answer',
-    '- ## TASK says "use a table" / specifies a format tag but <example> Output ignores it',
-    '- ## TASK says "active verb openings" but <example> Output opens with passive or nominal constructions',
-    '',
-    'If the example IS consistent with all ## TASK constraints: output only the word ALIGNED',
-    '',
-    'If NOT consistent: output ONLY the corrected <example> block (Input unchanged, Output rewritten):',
-    '<example>',
-    'Input: [copy original Input line exactly]',
-    'Output: [rewritten to strictly satisfy all ## TASK constraints — same domain/specificity, corrected format]',
-    '</example>',
-    '',
-    'ALIGNED or corrected <example> block only — no preamble, no explanation.',
-  ].join('\n');
-
-  try {
-    const result = await groqCall(apiKey, GROQ_PRUNER_MODEL, systemMsg, candidate, 400, 'Agent2-CrossValidate', 0.1);
-    if (result.trim().toUpperCase().startsWith('ALIGNED')) return candidate;
-
-    const fixedBlock = result.match(/<example>[\s\S]*?<\/example>/i);
-    if (!fixedBlock) return candidate; // no parseable fix — keep original
-
-    const patched = candidate.replace(/<example>[\s\S]*?<\/example>/i, fixedBlock[0].trim());
-    if (patched !== candidate) {
-      console.log('[PromptForge] Joint-Opt cross-validation: example patched for ## TASK alignment');
-    }
-    return patched;
-  } catch {
-    return candidate; // fail-open — never drop a candidate
-  }
-}
-
 /* ── Three-agent optimization pipeline ──────────────────────────────── */
 
 // tabId: chrome tab ID of the sender — used to push progress labels back.
-// examples: normalised prompts.chat objects  { title, content }
-// patternNotes: string[] from analyzePatterns()
+// Simplified pipeline: single focused Groq call with fill-in-the-blank template.
+// The model fills short fields instead of generating a prompt from scratch.
 async function runOptimizePipeline(apiKey, userPrompt, chatHistory, lastAssistantMessage, examples, patternNotes, tabId, mode = 'auto', answers = [], stylePlaybooks = {}) {
 
-  // Send a progress label to the content script button
   const progress = (label) => {
     if (tabId != null) {
       chrome.tabs.sendMessage(tabId, { type: 'PIPELINE_PROGRESS', label }).catch(() => {});
@@ -615,451 +667,375 @@ async function runOptimizePipeline(apiKey, userPrompt, chatHistory, lastAssistan
   progress('⚡ Pruning...');
 
   let prunedContext = 'NONE';
+  // ── Domain inference from prompt text ────────────────────────────────────
   let domain = 'generic';
-  let taskType = 'knowledge'; // default; overridden by Agent 1 TASK_TYPE field
+  const promptLower = userPrompt.toLowerCase();
+  if (/\b(code|debug|function|bug|error|api|deploy|refactor|test|class|variable|python|javascript|react|sql|git)\b/.test(promptLower)) domain = 'code';
+  else if (/\b(writ|edit|essay|blog|copy|article|email|rewrite|grammar|tone|draft)\b/.test(promptLower)) domain = 'writing';
+  else if (/\b(data|analys|chart|metric|trend|csv|dashboard|statistic|number)\b/.test(promptLower)) domain = 'data';
+  else if (/\b(story|poem|fiction|creative|character|scene|dialogue|novel|script)\b/.test(promptLower)) domain = 'creative';
+  else if (/\b(explain|teach|learn|concept|understand|how does|what is|why does|study)\b/.test(promptLower)) domain = 'research';
 
-  // Run Agent 1 if we have EITHER full chat history OR at least lastAssistantMessage.
-  // When structured DOM selectors fail, the broad fallback recovers lastAssistantMessage —
-  // enough for Agent 1 to classify domain and extract intent from.
-  if ((chatHistory && chatHistory.length > 0) || lastAssistantMessage) {
-    const historyText = chatHistory.length > 0
-      ? chatHistory.map(m => `${m.role}: ${m.content}`).join('\n')
-      : '[Chat history unavailable — structured selectors did not match the page DOM]';
-    try {
-      // Generic playbook applies at Agent 1 stage (domain unknown yet) — inform the GOAL field.
-      // strategyDoc (ACE format) is richer than bullet rules; use it when available.
-      const genericEntry    = normalizePlaybook(stylePlaybooks.generic);
-      const styleRulesBlock = genericEntry.strategyDoc
-        ? `\nUSER STRATEGY DOCUMENT (cross-domain preferences — factor into GOAL field):\n${genericEntry.strategyDoc}`
-        : genericEntry.rules.length > 0
-          ? `\nUSER-SPECIFIC STYLE RULES (cross-domain preferences — factor into GOAL field):\n${genericEntry.rules.map(r => `- ${r}`).join('\n')}`
-          : '';
-
-      const agent1Raw = await groqCall(
-        apiKey,
-        GROQ_PRUNER_MODEL,
-        `You are a conversation analyst. Extract structured facts from the conversation.
-
-Output EXACTLY this format — one field per line, no extra text:
-DOMAIN: [code / writing / data / creative / research / generic]
-TASK_TYPE: [reasoning-bound → task requires multi-step logic, code, math, debugging, or algorithms / knowledge-bound → task requires facts, summaries, writing, definitions, or research]
-TASK: [one sentence — what the user is currently trying to accomplish]
-CONTEXT: [2-3 specific facts copied VERBATIM — exact file names, exact function names, exact error messages, exact URLs as they appear in the conversation. Do NOT paraphrase. Separate facts with " | ". Example: "process_dataframe() | MemoryError on line 42 | 512MB Lambda limit"]
-EVIDENCE: [paste the single most specific piece of verbatim evidence from the conversation — an exact error message, an exact function signature, or an exact 1-2 line code fragment. Max 150 chars. Never paraphrase. "none" if no concrete evidence present]
-TRIED: [what has already been attempted or ruled out — "none" if nothing]
-GOAL: [what a perfect Claude response would accomplish for the user — factor in any User-Specific Style Rules below]
-TECH: [exact languages, frameworks, libraries, tools, versions — "none" if not applicable]
-
-Rules: Copy exact names, numbers, and error messages. Never substitute "some function" for the real function name. Never write "the user's code" when you can write the actual function name.
-If history is empty, output all fields as "none" except DOMAIN which must be "generic" and TASK_TYPE which must be "knowledge-bound".${styleRulesBlock}`,
-        chatHistory.length > 0
-          ? `User's new prompt: "${userPrompt}"\n\nConversation history:\n${historyText}`
-          : `User's new prompt: "${userPrompt}"\n\nLast AI response (full chat history unavailable — use this to infer domain, task, and any verbatim evidence):\n${lastAssistantMessage}`,
-        900,
-      );
-
-      // Parse structured key-value output
-      const fields = {};
-      for (const line of agent1Raw.trim().split('\n')) {
-        const m = line.match(/^(DOMAIN|TASK_TYPE|TASK|CONTEXT|EVIDENCE|TRIED|GOAL|TECH):\s*(.+)/i);
-        if (m) fields[m[1].toUpperCase()] = m[2].trim();
-      }
-
-      domain = (fields.DOMAIN || 'generic').toLowerCase();
-      if (!DOMAIN_EXAMPLES[domain]) domain = 'generic';
-      taskType = (fields.TASK_TYPE || '').toLowerCase().includes('reasoning') ? 'reasoning' : 'knowledge';
-      console.log('[PromptForge] Agent 1 task type:', taskType);
-
-      // Build a structured context block for Agent 2 — each field clearly labelled.
-      // EVIDENCE goes first: it's the most specific verbatim detail from the conversation
-      // and should be the highest-priority anchor for Agent 2's ## CONTEXT block.
-      const ctxPieces = [];
-      if (fields.EVIDENCE && fields.EVIDENCE !== 'none') ctxPieces.push(`EVIDENCE (verbatim from conversation): ${fields.EVIDENCE}`);
-      if (fields.TASK    && fields.TASK    !== 'none') ctxPieces.push(`TASK: ${fields.TASK}`);
-      if (fields.CONTEXT && fields.CONTEXT !== 'none') ctxPieces.push(`CONTEXT: ${fields.CONTEXT}`);
-      if (fields.TRIED   && fields.TRIED   !== 'none') ctxPieces.push(`TRIED: ${fields.TRIED}`);
-      if (fields.GOAL    && fields.GOAL    !== 'none') ctxPieces.push(`GOAL: ${fields.GOAL}`);
-      if (fields.TECH    && fields.TECH    !== 'none') ctxPieces.push(`TECH: ${fields.TECH}`);
-      prunedContext = ctxPieces.length > 0 ? ctxPieces.join('\n') : 'NONE';
-
-      console.log('[PromptForge] Agent 1 domain:', domain);
-      console.log('[PromptForge] Agent 1 structured context:\n', prunedContext);
-    } catch (err) {
-      console.warn('[PromptForge] Agent 1 failed, continuing without context:', err.message);
-    }
+  // ── Build context from conversation (if available) ─────────────────────
+  let conversationContext = '';
+  if (chatHistory && chatHistory.length > 0) {
+    conversationContext = '\n\nConversation context:\n' +
+      chatHistory.slice(-6).map(t => `${t.role}: ${t.content}`).join('\n');
+  }
+  if (lastAssistantMessage) {
+    conversationContext += '\n\nLast AI response:\n' + lastAssistantMessage.slice(0, 1000);
+  }
+  if (answers.length > 0) {
+    conversationContext += '\n\nUser clarification: ' + answers.join('; ');
   }
 
-  // ── Agent 2: Prompt Optimizer ×3 in parallel (llama-3.3-70b-versatile) ─
-  // High temperature for variety; best-of-3 dramatically improves quality.
-  progress('⚡ Optimizing (×3)...');
+  // ── Build reference from search results ────────────────────────────────
+  let referenceBlock = '';
+  if (examples.length > 0) {
+    referenceBlock = '\n\nReference prompts (proven patterns — adopt their style):\n' +
+      examples.slice(0, 3).map((e, i) => `[${i + 1}] ${e.title}: ${e.content.slice(0, 400)}`).join('\n\n');
+  }
 
-  const optimizerSystemMsg = buildOptimizerSystemMsg(domain, mode, examples, patternNotes, taskType);
-  console.log('[PromptForge Agent2 system prompt]:', optimizerSystemMsg);
+  // ── SINGLE Groq call — fill-in-the-blank template ──────────────────────
+  progress('⚡ Optimizing...');
 
-  // The prompt-to-rewrite goes in the USER message (never in the system prompt)
-  // so models can't confuse "execute this" with "rewrite this".
-  // Context is structured so Agent 2 can read each field directly.
-  const ctxLines = [];
-  if (prunedContext !== 'NONE')  ctxLines.push(prunedContext); // already key-value formatted by Agent 1
-  if (lastAssistantMessage)      ctxLines.push(`LAST CLAUDE RESPONSE (what the user is most likely referring to):\n${lastAssistantMessage.slice(0, 2000)}`);
-  if (answers.length > 0)        ctxLines.push(`USER'S STATED INTENT:\n${answers.join('\n\n')}`);
-  // Domain playbook takes priority; fall back to generic when no domain-specific entry exists.
-  // strategyDoc (ACE format) injects a coherent narrative instead of a bullet list.
-  const domainEntry    = normalizePlaybook(stylePlaybooks[domain] || stylePlaybooks.generic);
-  const styleInjection = domainEntry.strategyDoc
-    ? `USER STRATEGY DOCUMENT — ${domain} domain (apply to ## ROLE / ## CONTEXT / ## TASK / ## OUTPUT FORMAT):\n${domainEntry.strategyDoc}`
-    : domainEntry.rules.length > 0
-      ? `USER-SPECIFIC STYLE RULES — ${domain} domain (apply to ## ROLE / ## CONTEXT / ## TASK / ## OUTPUT FORMAT):\n${domainEntry.rules.map(r => `- ${r}`).join('\n')}`
-      : null;
-  if (styleInjection) ctxLines.push(styleInjection);
+  const systemMsg = `You fill in prompt templates. Given a user's rough prompt, fill each field below.
 
-  const contextBlock = ctxLines.length > 0
-    ? `\n\nContext — incorporate every specific detail into the rewrite:\n${ctxLines.join('\n\n')}`
-    : '';
-  const optimizerUser = `Rewrite this prompt:\n"${userPrompt}"${contextBlock}`;
+ABSOLUTE RULES:
+1. ONLY use information from the user's prompt and conversation context. Do NOT invent ANY details.
+2. If the prompt is about health, the rewrite must be about health. If about cooking, about cooking. SAME TOPIC.
+3. <ctx> must be the user's request IN THEIR OWN WORDS — rephrase for clarity but add NOTHING new.
+4. Each field: 5-20 words. Short and honest.
 
-  // Merge base diversity profile with any mode-specific temperature override.
-  // Spread order: base first, then mode — temperature is replaced, top_p/top_k preserved.
-  // This keeps each optimizer's structural identity (nucleus vs top-k) under all modes.
-  const modeOverride = AGENT2_PARAMS[mode] || [];
-  const [paramsA, paramsB, paramsC] = AGENT2_PARAMS.default.map((base, i) => ({
-    ...base,
-    ...(modeOverride[i] || {}),
-  }));
+Fill this template:
+<role>[what expert answers this? based on the TOPIC of their prompt]</role>
+<ctx>[restate their request using their words — do not add details they didn't mention]</ctx>
+<task>
+- [what they want, as an action phrase]
+- [what would make the response more useful]
+</task>
+<rules>
+MUST: [one requirement for a good response to THIS specific request]
+MUST: [another requirement]
+NEVER: [one failure mode to avoid for THIS specific request]
+NEVER: [another failure mode]
+</rules>
+<fmt>[best output format for this type of request]</fmt>`;
 
-  // Destructure temperature out so it stays in the named param slot;
-  // the rest (top_p / top_k) spreads into groqCall's extra argument.
-  const { temperature: tempA, ...extraA } = paramsA;  // Conservative: top_p
-  const { temperature: tempB, ...extraB } = paramsB;  // Creative:     top_p
-  const { temperature: tempC, ...extraC } = paramsC;  // Diverse:      top_k
+  const userMsg = `Fill the template for this prompt:\n"${userPrompt}"${conversationContext}${referenceBlock}`;
 
-  // Token cap: Brief mode caps at 800 (short prompt + compact example); others get 1500.
-  const agent2Tokens = mode === 'brief' ? 800 : 1500;
-
-  const agent2Results = await Promise.allSettled([
-    groqCall(apiKey, GROQ_OPTIMIZER_MODEL, optimizerSystemMsg, optimizerUser, agent2Tokens, 'Optimizer1-Conservative', tempA, extraA),
-    groqCall(apiKey, GROQ_OPTIMIZER_MODEL, optimizerSystemMsg, optimizerUser, agent2Tokens, 'Optimizer2-Creative',     tempB, extraB),
-    groqCall(apiKey, GROQ_DIVERSITY_MODEL, optimizerSystemMsg, optimizerUser, agent2Tokens, 'Optimizer3-Diverse',      tempC, extraC),
+  // Run 2 candidates at different temperatures — pick the better one
+  const [r1, r2] = await Promise.allSettled([
+    groqCall(apiKey, GROQ_OPTIMIZER_MODEL, systemMsg, userMsg, 600, 'Opt-Lo', 0.2),
+    groqCall(apiKey, GROQ_OPTIMIZER_MODEL, systemMsg, userMsg, 600, 'Opt-Hi', 0.6),
   ]);
 
-  const rawCandidates = agent2Results
+  const candidates = [r1, r2]
     .filter(r => r.status === 'fulfilled' && r.value)
-    .map(r => r.value);
+    .map(r => {
+      const raw = r.value;
+      // Extract from <role> onward (model might add preamble)
+      const idx = raw.indexOf('<role>');
+      return idx !== -1 ? raw.slice(idx).trim() : raw.trim();
+    })
+    .filter(c => /^<role>/i.test(c));
 
-  // Helper: does this text look like a 4-block rewritten prompt (vs an answer)?
-  // Valid rewrites open with the ## ROLE block header.
-  const isRewrite = (text) => /^##\s*ROLE\b/i.test(text.trim());
-
-  const candidates = rawCandidates.filter(c => {
-    const ok = isRewrite(c);
-    if (!ok) console.warn('[PromptForge] Discarded candidate (looks like an answer):', c.slice(0, 100));
-    return ok;
-  });
-
-  // If ALL candidates failed, the models are misbehaving — throw so the user sees an error
-  // rather than silently passing answers downstream.
   if (candidates.length === 0) {
-    console.error('[PromptForge] All Agent 2 candidates look like answers, not rewrites. Raw outputs:', rawCandidates);
-    throw new Error('Optimization failed — models answered instead of rewriting. Try again or reload the extension.');
+    // Both failed — return code-built fallback
+    return { text: buildFallbackPrompt(userPrompt, domain), rationale: '' };
   }
 
-  if (candidates.length === 0) throw new Error('All Agent 2 calls failed');
-  candidates.forEach((c, i) => console.log(`[Agent2 candidate ${i + 1}]:`, c));
+  // Pick the candidate with better topic coherence
+  let best = candidates[0];
+  if (candidates.length > 1) {
+    const issue0 = checkTopicCoherence(candidates[0], userPrompt, chatHistory, lastAssistantMessage);
+    const issue1 = checkTopicCoherence(candidates[1], userPrompt, chatHistory, lastAssistantMessage);
+    if (issue0 && !issue1) best = candidates[1];
+    else if (!issue0 && issue1) best = candidates[0];
+    // If both pass or both fail, keep the lower-temperature one (more reliable)
+  }
 
-  // ── Joint-Optimization cross-validation ─────────────────────────────────
-  // Ensures <example> Output in each candidate strictly demonstrates ## TASK constraints.
-  // Runs in parallel — one cross-validate call per candidate, using the fast 8b model.
-  progress('⚡ Cross-validating...');
-  const finalCandidates = await Promise.all(candidates.map(c => crossValidateCandidate(apiKey, c)));
+  // ── Topic coherence check ─────────────────────────────────────────────
+  const topicIssue = checkTopicCoherence(best, userPrompt, chatHistory, lastAssistantMessage);
+  if (topicIssue) {
+    console.warn('[PromptForge] Topic coherence FAILED:', topicIssue);
+    return { text: buildFallbackPrompt(userPrompt, domain), rationale: '' };
+  }
 
-  // Skip the merger if only one candidate came back
-  if (finalCandidates.length === 1) return { text: finalCandidates[0], rationale: '' };
+  // ── Hallucination strip ───────────────────────────────────────────────
+  best = stripHallucinations(best, userPrompt, chatHistory, lastAssistantMessage);
 
-  // ── Agent 3: Pairwise LLM-as-Judge with Explain-First prompting ──────────
-  // Uses pairwise evaluation (A vs B → winner vs C) to avoid position and verbosity bias.
-  // Explain-First: REASONING RATIONALE is generated before the final prompt, forcing
-  // the model to commit to a logical argument before synthesising — not after.
-  progress('⚡ Evaluating (pairwise)...');
+  // ── Quality check ─────────────────────────────────────────────────────
+  const qualityIssue = detectGenericOutput(best);
+  if (qualityIssue) {
+    console.warn('[PromptForge] Quality gate failed:', qualityIssue);
+    return { text: buildFallbackPrompt(userPrompt, domain), rationale: '' };
+  }
 
-  const mergerSystemMsg = [
-    `You are a prompt quality judge. Below are ${finalCandidates.length} candidate REWRITES (A, B, C) each in 4-block format (## ROLE / ## CONTEXT / ## TASK / ## OUTPUT FORMAT) followed by an <example> block.`,
-    '',
-    'Execute these four steps in order — do NOT skip or merge steps:',
-    '',
-    'STEP 1 — Compare Candidate A vs Candidate B on three dimensions:',
-    '  1. Role specificity (## ROLE)',
-    '  2. Context completeness and signal-to-noise ratio (## CONTEXT)',
-    '  3. Task clarity and instruction precision (## TASK + ## OUTPUT FORMAT)',
-    'One sentence per dimension stating which wins and why. Declare Round 1 winner.',
-    '',
-    'STEP 2 — Compare Round 1 winner vs Candidate C on the same three dimensions.',
-    'Declare Final winner.',
-    '',
-    'STEP 3 — BELIEF INSPECTION:',
-    'Review every candidate for "hallucinated intent" — constraints, assumptions, or details that were NOT present in the user\'s original rough prompt.',
-    'A candidate hallucinates intent when it adds role seniority ("15 years experience"), domain specificity ("AWS Lambda"), output scope ("top 5"), or task complexity that the rough prompt never mentioned.',
-    'List each hallucinated assumption found across all candidates.',
-    'The final synthesised prompt must NOT include any hallucinated assumption — strip them, keep only what the rough prompt verifiably implies.',
-    '',
-    'STEP 4 — Synthesise: use the Final winner as base. If a losing candidate has one clearly superior block, incorporate it. Apply Belief Inspection — remove any hallucinated assumptions.',
-    '',
-    'OUTPUT FORMAT — return EXACTLY this structure:',
-    '',
-    'REASONING RATIONALE:',
-    'Round 1 (A vs B): [role → winner | context → winner | task → winner | Overall: X]',
-    'Round 2 ([winner] vs C): [role → winner | context → winner | task → winner | Overall: X]',
-    'Belief Inspection: [list hallucinated assumptions found, e.g. "C assumed AWS Lambda (not in rough prompt)" — or "none"]',
-    'Discarded: [what was removed from final prompt because unverifiable — or "none"]',
-    'Synthesis: [what was borrowed from a losing candidate, or "none"]',
-    '',
-    '## ROLE',
-    '[synthesised role — "You are a…"]',
-    '',
-    '## CONTEXT',
-    '[synthesised context — 2-3 sentences with all specific details]',
-    '',
-    '## TASK',
-    '1. [primary instruction]',
-    '2. [secondary instruction]',
-    '3. [tertiary instruction or mode constraint]',
-    '',
-    '## OUTPUT FORMAT',
-    '<[tag]>',
-    '[format specification]',
-    '</[tag]>',
-    '',
-    '<example>',
-    '[best example block — verbatim from any candidate]',
-    '</example>',
-    '',
-    'REASONING RATIONALE must appear first. ## ROLE must immediately follow. No preamble outside this structure.',
-    '',
-    ...finalCandidates.map((c, i) => `Candidate ${String.fromCharCode(65 + i)}:\n${c}`),
-  ].join('\n');
+  return { text: best, rationale: '' };
+}
 
-  const mergerRaw = await groqCall(
-    apiKey, GROQ_OPTIMIZER_MODEL, mergerSystemMsg,
-    `Original rough prompt (for Belief Inspection — discard any candidate assumption not grounded here):\n"${userPrompt}"\n\nRun the pairwise evaluation, perform Belief Inspection, then synthesise the final prompt.`,
-    2200, 'Agent3', 0.1,
+/* ── Output quality detector ─────────────────────────────────────────── */
+// Returns a string describing the problem if the output is generic, or null if ok.
+
+function detectGenericOutput(text) {
+  const lower = text.toLowerCase();
+
+  // Check for meta-description <ideal> — the #1 failure mode
+  const idealMatch = text.match(/<ideal>([\s\S]*?)<\/ideal>/i);
+  if (idealMatch) {
+    const ideal = idealMatch[1].trim().toLowerCase();
+    // Meta-descriptions use phrases like "a clear explanation of..." or "a detailed response..."
+    if (/^a\s+(clear|detailed|concise|comprehensive|thorough|well-structured|helpful|good)\b/.test(ideal)) {
+      return '<ideal> is a meta-description ("' + ideal.slice(0, 50) + '..."), not an actual example';
+    }
+    if (/^(provide|give|offer|present|deliver|include)\s/.test(ideal)) {
+      return '<ideal> starts with an instruction verb, not actual content';
+    }
+    // Very short <ideal> is suspicious
+    if (ideal.length < 30) {
+      return '<ideal> is too short (' + ideal.length + ' chars) to be a real example';
+    }
+  }
+
+  // Check for generic <role>
+  const roleMatch = text.match(/<role>([\s\S]*?)<\/role>/i);
+  if (roleMatch) {
+    const role = roleMatch[1].trim().toLowerCase();
+    const genericRoles = ['teacher', 'assistant', 'helper', 'expert', 'ai', 'tutor', 'educator', 'guide'];
+    // Role is just a single generic word with no specialization
+    if (genericRoles.includes(role) || (role.length < 15 && !role.includes('|'))) {
+      return '<role> is too generic ("' + role + '") — needs specific specialization';
+    }
+  }
+
+  // Check for generic <ctx>
+  const ctxMatch = text.match(/<ctx>([\s\S]*?)<\/ctx>/i);
+  if (ctxMatch) {
+    const ctx = ctxMatch[1].trim().toLowerCase();
+    // Just synonym lists with no substance
+    if (/^[a-z]+\|[a-z]+(\|[a-z]+)*$/.test(ctx) && ctx.length < 40) {
+      return '<ctx> is just a synonym list ("' + ctx + '"), no actual context';
+    }
+  }
+
+  // Check for meta-description <wrong>
+  const wrongMatch = text.match(/<wrong>([\s\S]*?)<\/wrong>/i);
+  if (wrongMatch) {
+    const wrong = wrongMatch[1].trim().toLowerCase();
+    if (/^a\s+(vague|unclear|poor|bad|generic|ambiguous|confusing)\b/.test(wrong)) {
+      return '<wrong> is a meta-description, not an actual bad example';
+    }
+    if (wrong.length < 20) {
+      return '<wrong> is too short to be a real example';
+    }
+  }
+
+  return null; // output looks OK
+}
+
+/* ── Hallucination stripper ──────────────────────────────────────────── */
+// Structural post-processing: checks every claim in <ctx> against the user's
+// actual input. Strips sentences/phrases that contain specific details not
+// found in the original prompt or conversation. This is CODE, not an LLM
+// instruction — the model can't ignore it.
+
+function stripHallucinations(output, userPrompt, chatHistory = [], lastAssistantMessage = null) {
+  // Build the source text — everything the user actually said
+  const sourceText = [
+    userPrompt,
+    ...(chatHistory || []).map(t => t.content || ''),
+    lastAssistantMessage || '',
+  ].join(' ').toLowerCase();
+
+  // Extract source words (3+ chars, deduplicated) — these are "grounded" terms
+  const sourceWords = new Set(
+    sourceText.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length >= 3)
   );
 
-  // Explain-First output begins with REASONING RATIONALE — extract and log it,
-  // then slice from ## ROLE for the actual 4-block prompt.
-  const roleIdx = mergerRaw.indexOf('## ROLE');
-  if (roleIdx > 0) {
-    console.log('[PromptForge] Agent 3 pairwise reasoning:\n', mergerRaw.slice(0, roleIdx).trim());
-  }
-  const mergedPrompt = roleIdx !== -1 ? mergerRaw.slice(roleIdx).trim() : mergerRaw;
-  const finalResult = isRewrite(mergedPrompt)
-    ? mergedPrompt
-    : (console.warn('[PromptForge] Agent 3 dropped role line, using best candidate'), finalCandidates[0]);
+  // ── Check <ctx> for hallucinated specifics ──────────────────────────────
+  const ctxMatch = output.match(/<ctx>([\s\S]*?)<\/ctx>/i);
+  if (ctxMatch) {
+    const ctxContent = ctxMatch[1].trim();
+    // Split <ctx> into claims (pipe-separated or sentence-separated)
+    const claims = ctxContent.split(/[|;.]/).map(c => c.trim()).filter(Boolean);
 
-  // ── Agent 4: Textual Gradient — Root-Cause Analysis ─────────────────────
-  // Instead of directly patching the merged prompt, Agent 4 produces a
-  // structured critique (the "gradient") that explains WHY a specific
-  // constraint is likely to be ignored or hallucinated by Claude.
-  // This gradient is then fed back to the Merger (Agent 3b) as a targeted
-  // fix signal — creating a logical, traceable bridge between the merged
-  // output and the final polished version.
-  progress('⚡ Analysing...');
+    const grounded = [];
+    const stripped = [];
 
-  let gradient = null;
-  try {
-    const gradientSystemMsg = [
-      'You are a prompt robustness analyst. Your job is failure mode analysis only — do NOT rewrite the prompt.',
-      '',
-      'The input is a structured prompt: ## ROLE / ## CONTEXT / ## TASK / ## OUTPUT FORMAT + <example>.',
-      '',
-      'STEP 0 — FAILURE MODE SIMULATION (perform internally, do not output):',
-      'Simulate three distinct user mindsets reading this prompt:',
-      '  RUSHED USER: Will they skip nuanced or multi-part instructions and take the path of least resistance?',
-      '  SKEPTICAL USER: Does the methodology or instruction sequence contain logical gaps that would withstand scrutiny?',
-      '  CREATIVE USER: Could someone use this prompt for an unintended purpose that produces a wrong or unhelpful response?',
-      'Identify which mindset exposes the MOST FRAGILE point in this prompt.',
-      'Your FIX DIRECTION must prioritise making the prompt robust against that mindset — "idiot-proof" for the most likely misuse.',
-      '',
-      'STEP 1 — GENERATOR-RETRIEVER DISCONNECT CHECK:',
-      'Examine whether ## CONTEXT contains phrases irrelevant or tangential to ## TASK.',
-      'If a disconnect is found, output:',
-      '  CONSTRAINT: [## CONTEXT] "[quote the noisy phrase]"',
-      '  ROOT CAUSE: Generator-Retriever disconnect — ## CONTEXT dilutes task signal with irrelevant information',
-      '  FIX DIRECTION: Remove "[noisy phrase]" from ## CONTEXT; retain only what ## TASK explicitly requires',
-      '',
-      'STEP 2 — If NO disconnect: identify the single constraint most fragile under Failure Mode Simulation.',
-      'Output:',
-      '  CONSTRAINT: [## BLOCKNAME] "[quote the exact phrase most at risk]"',
-      '  ROOT CAUSE: [one sentence — why this fails under the identified mindset]',
-      '  FIX DIRECTION: [one sentence — the minimal, idiot-proofing edit that closes this failure mode]',
-      '',
-      'Always output EXACTLY three lines: CONSTRAINT / ROOT CAUSE / FIX DIRECTION — no step labels, no preamble.',
-    ].join('\n');
+    for (const claim of claims) {
+      // Extract significant words from this claim (nouns, numbers, specifics)
+      const claimWords = claim.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length >= 3);
 
-    gradient = await groqCall(
-      apiKey, GROQ_PRUNER_MODEL, gradientSystemMsg, finalResult, 200, 'Agent4-Gradient', 0.1,
-    );
-    console.log('[PromptForge] Agent 4 textual gradient:\n', gradient);
-  } catch (err) {
-    console.warn('[PromptForge] Agent 4 gradient failed:', err.message);
-  }
-
-  // ── Agent 3b: Gradient Application — Merger patches its own output ────────
-  // The Merger receives its original merged prompt + the critic's root-cause
-  // gradient and applies the targeted fix. Changing only what the gradient
-  // identifies keeps the rest of the merge intact and ensures the final
-  // output is a direct, traceable improvement over the merged version.
-  progress('⚡ Polishing...');
-
-  let polishedResult = finalResult;
-  if (gradient) {
-    try {
-      const applySystemMsg = [
-        'You are a prompt synthesis expert. You previously merged several candidates into a 4-block structured prompt.',
-        'A root-cause analysis (textual gradient) has pinpointed the single biggest failure risk in one specific block.',
-        '',
-        'Apply the FIX DIRECTION to patch only the identified block (## ROLE / ## CONTEXT / ## TASK / ## OUTPUT FORMAT).',
-        'All other blocks must be copied UNCHANGED. The <example> block must always be copied UNCHANGED.',
-        'Change as little as possible — surgical fix only.',
-        '',
-        'REQUIRED OUTPUT FORMAT — return the full 4-block structure + <example>:',
-        '',
-        '## ROLE',
-        '[unchanged unless gradient targets ## ROLE]',
-        '',
-        '## CONTEXT',
-        '[unchanged unless gradient targets ## CONTEXT]',
-        '',
-        '## TASK',
-        '[unchanged unless gradient targets ## TASK]',
-        '',
-        '## OUTPUT FORMAT',
-        '[unchanged unless gradient targets ## OUTPUT FORMAT]',
-        '',
-        '<example>',
-        '[original example — always unchanged]',
-        '</example>',
-        '',
-        '## ROLE must remain the first line and start with "You are a". No explanation, no label, no preamble.',
-      ].join('\n');
-
-      const applyUser = `MERGED PROMPT:\n${finalResult}\n\nTEXTUAL GRADIENT (root-cause analysis):\n${gradient}`;
-      const agent3bRaw = await groqCall(
-        apiKey, GROQ_OPTIMIZER_MODEL, applySystemMsg, applyUser, 1500, 'Agent3b', 0.1,
+      // Check for specific fabricated details: numbers, ages, proper nouns, technical terms
+      // that don't appear anywhere in the source text
+      const specificPatterns = claim.match(/\b(\d+[-–]year[-–]old|\d+ mg|[$]\d+|\d+%|\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)+\b)/g) || [];
+      const hasHallucinatedSpecific = specificPatterns.some(p =>
+        !sourceText.includes(p.toLowerCase())
       );
-      if (isRewrite(agent3bRaw)) {
-        polishedResult = agent3bRaw;
+
+      // Count how many significant words from the claim appear in the source
+      const significantWords = claimWords.filter(w =>
+        !['the', 'and', 'for', 'with', 'that', 'this', 'from', 'are', 'was', 'has', 'been',
+          'such', 'after', 'where', 'who', 'which', 'their', 'about', 'into', 'more',
+          'should', 'could', 'would', 'will', 'can', 'may', 'must', 'never'].includes(w)
+      );
+
+      const matchCount = significantWords.filter(w => sourceWords.has(w)).length;
+      const matchRatio = significantWords.length > 0 ? matchCount / significantWords.length : 1;
+
+      // A claim is hallucinated if:
+      // - It has fabricated specific details (numbers, ages, names not in source)
+      // - OR less than 30% of its significant words appear in the source
+      if (hasHallucinatedSpecific || (significantWords.length >= 3 && matchRatio < 0.3)) {
+        stripped.push(claim);
       } else {
-        console.warn('[PromptForge] Agent 3b dropped role line, keeping Agent 3 result');
-      }
-    } catch (err) {
-      console.warn('[PromptForge] Agent 3b (gradient apply) failed, using Agent 3 result:', err.message);
-    }
-  }
-
-  // ── "Why" rationale — one sentence explaining the most important change ──
-  // Run in parallel with chain generation when in chain mode, solo otherwise.
-  progress('⚡ Explaining...');
-
-  const whySystemMsg = `Given an ORIGINAL and an OPTIMIZED prompt, write ONE sentence (max 18 words) naming the single most important change and why it matters. Lead with what changed. No preamble. Example: "Replaced 'help me' with 'List' — action verbs constrain output and prevent vague responses."`;
-  const whyUser = `ORIGINAL: "${userPrompt}"\n\nOPTIMIZED:\n${polishedResult}`;
-
-  if (mode === 'chain') {
-    // Skeleton-of-Thought (SoT) chain mode:
-    // Phase 1: 8b model generates a task-specific skeleton of thinking questions.
-    // Phase 2: 70b model refines each skeleton point in parallel.
-    // Phase 3: role line + refined points are merged into a structured priming prompt.
-    // The user sends the priming prompt first → Claude answers the skeleton → user sends the main prompt.
-    progress('⚡ Building chain (SoT)...');
-
-    const skeletonSystemMsg = [
-      'You are a Skeleton-of-Thought prompt designer. Given a structured task prompt,',
-      'generate 4-6 specific thinking questions Claude must answer BEFORE starting the task.',
-      '',
-      'Rules:',
-      '- Questions must be TASK-SPECIFIC — banned: "What are your goals?", "What format do you want?"',
-      '- Each question targets a distinct knowledge or reasoning gap for this exact task',
-      '- Answering all questions in sequence builds a complete mental scaffold',
-      '- Max 12 words per question',
-      '',
-      'Return ONLY a numbered list of questions. No preamble, no explanation.',
-    ].join('\n');
-
-    // Phase 1: skeleton + rationale in parallel (both use fast 8b model)
-    const [whySettled, skeletonSettled] = await Promise.allSettled([
-      groqCall(apiKey, GROQ_PRUNER_MODEL, whySystemMsg, whyUser, 80, 'AgentWhy', 0.2),
-      groqCall(apiKey, GROQ_PRUNER_MODEL, skeletonSystemMsg, polishedResult, 250, 'AgentChain-Skeleton', 0.2),
-    ]);
-
-    const rationale = whySettled.status === 'fulfilled' ? whySettled.value : '';
-
-    if (skeletonSettled.status === 'fulfilled') {
-      const skeletonPoints = skeletonSettled.value
-        .split('\n')
-        .map(l => l.replace(/^\d+\.\s*/, '').trim())
-        .filter(p => p.length > 8 && p.length < 120)
-        .slice(0, 6);
-
-      console.log('[PromptForge] Chain SoT skeleton:', skeletonPoints);
-
-      if (skeletonPoints.length >= 3) {
-        // Phase 2: parallel expansion — 70b refines each skeleton question to be more precise
-        const expandSettled = await Promise.allSettled(
-          skeletonPoints.map((point, i) =>
-            groqCall(
-              apiKey, GROQ_OPTIMIZER_MODEL,
-              'Rewrite this thinking question to be more specific and precise for the given task (max 15 words). Return ONLY the rewritten question.',
-              `Task context:\n${polishedResult.slice(0, 400)}\n\nQuestion to refine: "${point}"`,
-              45, `AgentChain-Expand${i + 1}`, 0.2,
-            )
-          )
-        );
-
-        // Fall back to raw skeleton point if any expansion fails
-        const refinedPoints = expandSettled.map((r, i) =>
-          r.status === 'fulfilled' ? r.value.trim() : skeletonPoints[i]
-        );
-
-        // Phase 3: merge — extract role line and compose the structured priming prompt
-        const roleMatch  = polishedResult.match(/^##\s*ROLE\s*\n+(.+)/m);
-        const roleLine   = roleMatch ? roleMatch[1].trim() : 'You are an expert assistant';
-        const numbered   = refinedPoints.map((p, i) => `${i + 1}. ${p}`).join('\n');
-        const priming    = `${roleLine}\n\nBefore the main task, briefly answer these skeleton questions (one sentence each):\n\n${numbered}\n\n(Reply with your skeleton answers — I'll send the full task next.)`;
-
-        return { text: `${priming}\n\n---CHAIN→---\n\n${polishedResult}`, rationale };
+        grounded.push(claim);
       }
     }
 
-    // Fallback: original simple priming — runs if skeleton has < 3 points or fails
-    console.warn('[PromptForge] Chain SoT skeleton insufficient, falling back to simple priming');
-    const chainSystemMsg = [
-      'You are a prompt chain designer. Given a main task prompt, write a SHORT priming prompt to send FIRST (2 lines max).',
-      'The priming prompt must:',
-      '1. Use the same expert role from the main prompt',
-      '2. Ask Claude to outline or think through the approach BEFORE doing the actual task',
-      '3. NOT begin the actual task itself',
-      'Return ONLY the priming prompt. No explanation, no label.',
-    ].join('\n');
-
-    let chainPriming = null;
-    try {
-      chainPriming = await groqCall(apiKey, GROQ_OPTIMIZER_MODEL, chainSystemMsg, polishedResult, 256, 'AgentChain', 0.3);
-    } catch (err) {
-      console.warn('[PromptForge] Chain fallback generation failed:', err.message);
+    if (stripped.length > 0) {
+      log('Hallucination stripper: removed from <ctx>:', stripped);
+      // Rebuild <ctx> with only grounded claims
+      const newCtx = grounded.length > 0
+        ? grounded.join('|')
+        : userPrompt.slice(0, 100); // fallback: just use the user's prompt
+      output = output.replace(/<ctx>[\s\S]*?<\/ctx>/i, `<ctx>${newCtx}</ctx>`);
     }
-
-    if (chainPriming) return { text: `${chainPriming}\n\n---CHAIN→---\n\n${polishedResult}`, rationale };
-    console.warn('[PromptForge] Chain generation failed, returning single prompt');
-    return { text: polishedResult, rationale };
   }
 
-  // Non-chain: just generate rationale
-  let rationale = '';
-  try {
-    rationale = await groqCall(apiKey, GROQ_PRUNER_MODEL, whySystemMsg, whyUser, 80, 'AgentWhy', 0.2);
-  } catch (err) {
-    console.warn('[PromptForge] Rationale generation failed:', err.message);
+  // ── Check <example><in> for hallucinated scenario ───────────────────────
+  const inMatch = output.match(/<in>([\s\S]*?)<\/in>/i);
+  if (inMatch) {
+    const inContent = inMatch[1].trim().toLowerCase();
+    const inWords = inContent.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length >= 3);
+    const sigWords = inWords.filter(w =>
+      !['the', 'and', 'for', 'with', 'that', 'this', 'how', 'what', 'can', 'you', 'please', 'help', 'want'].includes(w)
+    );
+    const matched = sigWords.filter(w => sourceWords.has(w)).length;
+    const ratio = sigWords.length > 0 ? matched / sigWords.length : 1;
+
+    // If <in> is mostly fabricated, replace with the user's actual prompt
+    if (sigWords.length >= 3 && ratio < 0.3) {
+      log('Hallucination stripper: replaced fabricated <in> with user prompt');
+      output = output.replace(/<in>[\s\S]*?<\/in>/i, `<in>${userPrompt}</in>`);
+    }
   }
 
-  return { text: polishedResult, rationale };
+  return output;
+}
+
+/* ── Topic coherence checker ──────────────────────────────────────────── */
+// Detects when the entire output is about a different topic than the user's prompt.
+// Returns a description of the mismatch, or null if coherent.
+
+function checkTopicCoherence(output, userPrompt, chatHistory = [], lastAssistantMessage = null) {
+  // Build source vocabulary — all significant words from what the user said
+  const sourceText = [
+    userPrompt,
+    ...(chatHistory || []).map(t => t.content || ''),
+    lastAssistantMessage || '',
+  ].join(' ').toLowerCase();
+
+  const stopWords = new Set([
+    'the','and','for','with','that','this','from','are','was','has','been','have',
+    'will','can','may','must','not','but','how','what','why','who','where','when',
+    'some','any','all','each','about','into','more','most','than','then','also',
+    'just','help','please','want','need','like','make','get','give','tell','show',
+    'really','very','much','should','could','would','being','out','its','you','your',
+    'they','them','their','our','his','her','something','someone','thing','stuff',
+  ]);
+
+  const getSignificantWords = (text) => {
+    return new Set(
+      text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
+        .filter(w => w.length >= 3 && !stopWords.has(w))
+    );
+  };
+
+  const sourceWords = getSignificantWords(sourceText);
+  if (sourceWords.size === 0) return null; // can't check empty prompts
+
+  // Extract topic words from the output's <role> + <ctx> + <task>
+  const roleMatch = output.match(/<role>([\s\S]*?)<\/role>/i);
+  const ctxMatch  = output.match(/<ctx>([\s\S]*?)<\/ctx>/i);
+  const taskMatch = output.match(/<task>([\s\S]*?)<\/task>/i);
+
+  const outputTopicText = [
+    roleMatch ? roleMatch[1] : '',
+    ctxMatch  ? ctxMatch[1]  : '',
+    taskMatch ? taskMatch[1] : '',
+  ].join(' ');
+
+  const outputWords = getSignificantWords(outputTopicText);
+  if (outputWords.size === 0) return null;
+
+  // Count overlap
+  let overlap = 0;
+  for (const w of sourceWords) {
+    if (outputWords.has(w)) overlap++;
+  }
+
+  // Also check reverse: what fraction of output topic words are grounded
+  let reverseOverlap = 0;
+  for (const w of outputWords) {
+    if (sourceWords.has(w)) reverseOverlap++;
+  }
+
+  const forwardRatio  = overlap / sourceWords.size;
+  const reverseRatio  = reverseOverlap / outputWords.size;
+
+  log('Topic coherence:', {
+    sourceWords: [...sourceWords].slice(0, 10),
+    outputWords: [...outputWords].slice(0, 10),
+    forwardRatio: forwardRatio.toFixed(2),
+    reverseRatio: reverseRatio.toFixed(2),
+  });
+
+  // If both directions show <15% overlap, the output is off-topic
+  if (forwardRatio < 0.15 && reverseRatio < 0.15) {
+    return `Output topic ("${[...outputWords].slice(0, 5).join(', ')}") has near-zero overlap with input topic ("${[...sourceWords].slice(0, 5).join(', ')}")`;
+  }
+
+  return null;
+}
+
+/* ── Fallback prompt builder — no LLM, pure code ────────────────────── */
+// When the pipeline produces a completely off-topic result, build a minimal
+// but honest structured prompt directly from the user's words.
+
+function buildFallbackPrompt(userPrompt, domain) {
+  // Extract key phrases from the user's prompt
+  const words = userPrompt.replace(/[^\w\s]/g, ' ').split(/\s+/).filter(w => w.length > 2);
+  const topicWords = words.filter(w =>
+    !['help', 'please', 'want', 'need', 'like', 'just', 'some', 'the', 'and', 'for', 'with',
+      'about', 'have', 'been', 'this', 'that', 'what', 'how', 'can', 'you', 'your'].includes(w.toLowerCase())
+  );
+
+  const topic = topicWords.slice(0, 6).join(' ') || userPrompt.slice(0, 50);
+  const domainRole = {
+    code: 'software engineer|debugging+problem solving',
+    writing: 'professional writer|clarity+concision',
+    data: 'data analyst|pattern recognition+insight extraction',
+    creative: 'creative consultant|ideation+storytelling',
+    research: 'subject matter expert|clear explanation+teaching',
+    generic: 'knowledgeable assistant|' + topic,
+  };
+
+  return `<role>${domainRole[domain] || domainRole.generic}</role>
+<ctx>${userPrompt}</ctx>
+<task>
+- Address the user's request: ${topic}
+- Provide clear, actionable information
+- Structure the response for easy understanding
+</task>
+<rules>
+MUST: stay focused on exactly what the user asked about
+MUST: be specific and practical
+NEVER: introduce topics or details the user didn't ask about
+NEVER: assume context that wasn't provided
+</rules>
+<fmt>clear|structured|directly relevant</fmt>`;
 }
 
 /* ── OPTIMIZE_WITH_CONTEXT handler (content script → background) ─────── */
@@ -1074,31 +1050,59 @@ async function handleOptimizeWithContext({ prompt, chatHistory = [], lastAssista
   // 2. Extract search keywords from the prompt + recent context
   const keywords = extractKeywords(prompt, chatHistory);
 
-  // 3. Search prompts.chat for real matching prompts, sorted by score
+  // 3. Search multiple sources in parallel for proven prompts
   let examples = [];
-  try {
-    // Ask for 8 so we have room to sort and still get 3 good ones
-    // &sort=votes is passed optimistically — ignored if unsupported
-    const raw = await searchPromptsREST(keywords, 8);
+  const [restSettled, ghSettled] = await Promise.allSettled([
+    // prompts.chat
+    (async () => {
+      const raw = await searchPromptsREST(keywords, 10);
+      raw.sort((a, b) => {
+        const score = r => r.votes ?? r.likes ?? r.upvotes ?? r.stars ?? r.score ?? 0;
+        return score(b) - score(a);
+      });
+      return raw.map(normalizePrompt).filter(Boolean).slice(0, 5);
+    })(),
+    // GitHub awesome-chatgpt-prompts
+    searchPromptsGitHub(keywords, 5),
+  ]);
 
-    // Client-side sort by any vote/score field the API may return
-    raw.sort((a, b) => {
-      const score = r => r.votes ?? r.likes ?? r.upvotes ?? r.stars ?? r.score ?? 0;
-      return score(b) - score(a);
-    });
-
-    examples = raw.map(normalizePrompt).filter(Boolean).slice(0, 3);
-    console.log('[PromptForge] prompts.chat examples fetched:',
-      examples.map(e => `"${e.title}"`).join(', ') || '(none)');
-  } catch (err) {
-    console.warn('[PromptForge] prompts.chat search failed:', err.message);
-    // Proceed without examples — Groq will still rewrite, just without models
+  if (restSettled.status === 'fulfilled' && restSettled.value.length > 0) {
+    examples.push(...restSettled.value);
+    log('prompts.chat examples:', examples.map(e => `"${e.title}"`).join(', '));
+  } else if (restSettled.status === 'rejected') {
+    console.warn('[PromptForge] prompts.chat search failed:', restSettled.reason?.message);
   }
+
+  if (ghSettled.status === 'fulfilled' && ghSettled.value.length > 0) {
+    examples.push(...ghSettled.value);
+    log('GitHub examples:', ghSettled.value.map(e => `"${e.title}"`).join(', '));
+  } else if (ghSettled.status === 'rejected') {
+    console.warn('[PromptForge] GitHub search failed:', ghSettled.reason?.message);
+  }
+
+  // 3b. Always include relevant built-in proven patterns
+  const provenMatches = matchProvenPatterns(keywords, '', 2);
+  if (provenMatches.length > 0) {
+    examples.push(...provenMatches);
+    log('Built-in patterns matched:', provenMatches.map(p => `"${p.title}"`).join(', '));
+  }
+
+  // 3c. Include user's previously accepted prompts (adapts over time)
+  try {
+    const accepted = await searchAcceptedPrompts(keywords, 2);
+    if (accepted.length > 0) {
+      examples.push(...accepted);
+      log('User accepted prompts matched:', accepted.map(p => `"${p.title}"`).join(', '));
+    }
+  } catch { /* ignore — first run has no accepted prompts */ }
+
+  // Deduplicate
+  examples = dedup(examples);
 
   // 4. Analyse structural patterns in the fetched prompts
   const patternNotes = examples.length > 0 ? analyzePatterns(examples) : [];
   if (patternNotes.length > 0)
-    console.log('[PromptForge] patterns detected:', patternNotes.join(', '));
+    log('patterns detected:', patternNotes.join(', '));
 
   // 5. Load domain-keyed style playbooks accumulated from past user edits
   const { pfStylePlaybooks: stylePlaybooks = {}, pfStyleRules: legacyRules } =
@@ -1109,12 +1113,15 @@ async function handleOptimizeWithContext({ prompt, chatHistory = [], lastAssista
     stylePlaybooks.generic = legacyRules;
     await chrome.storage.local.set({ pfStylePlaybooks: stylePlaybooks });
     await chrome.storage.local.remove('pfStyleRules');
-    console.log('[PromptForge] Migrated pfStyleRules → pfStylePlaybooks.generic');
+    log('Migrated pfStyleRules → pfStylePlaybooks.generic');
   }
 
-  const totalRules = Object.values(stylePlaybooks).flat().length;
+  const totalRules = Object.values(stylePlaybooks).reduce((sum, entry) => {
+    const e = normalizePlaybook(entry);
+    return sum + e.rules.length + (e.strategyDoc ? 1 : 0);
+  }, 0);
   if (totalRules > 0)
-    console.log('[PromptForge] Applying user style playbooks:', stylePlaybooks);
+    log('Applying user style playbooks:', stylePlaybooks);
 
   // 6. Run the pipeline (prune → optimize ×3 → merge → polish → rationale)
   const { text: optimized, rationale } = await runOptimizePipeline(
@@ -1136,11 +1143,11 @@ async function handleGenerateSystemPrompt({ optimizedPrompt }) {
   if (!apiKey) throw new Error('NO_API_KEY');
 
   const systemMsg = [
-    'You are converting a one-time prompt into a reusable Claude system prompt for Claude Projects.',
-    'Extract ONLY the permanent parts — role, expertise level, response style, output format preferences.',
-    'Do NOT include anything task-specific (the actual request the user made).',
-    'Write 3-5 lines starting with "You are…" that the user can set once and never repeat.',
-    'Return ONLY the system prompt text, no explanation, no label.',
+    'Convert this XML-structured prompt into a reusable Claude system prompt.',
+    'Extract ONLY permanent parts from <role> and <rules>: expertise, response style, format preferences.',
+    'Do NOT include task-specific content from <task> or <ctx>.',
+    'Write 3-5 lines starting with "You are…" — set once, never repeat.',
+    'Return ONLY the system prompt text, no explanation.',
   ].join('\n');
 
   return await groqCall(
@@ -1148,56 +1155,6 @@ async function handleGenerateSystemPrompt({ optimizedPrompt }) {
     `Optimized prompt:\n${optimizedPrompt}`,
     300, 'AgentSysPrompt', 0.3,
   );
-}
-
-/* ── GENERATE_QUESTIONS handler (Agent 0) ───────────────────────────── */
-// Uses the fast 8b model to produce 2 short clarifying questions specific to
-// the user's input. Called before the main pipeline in 'guided' mode.
-
-async function handleGenerateQuestions({ prompt, chatHistory = [], lastAssistantMessage = null }) {
-  const stored = await chrome.storage.sync.get('groqApiKey');
-  const apiKey = stored.groqApiKey;
-  if (!apiKey) throw new Error('NO_API_KEY');
-
-  const historyText = chatHistory.slice(-6).map(m => `${m.role}: ${m.content}`).join('\n');
-
-  const systemMsg = `You are a prompt clarification specialist. Given a rough user prompt and conversation context, generate exactly 2 questions whose answers would MOST improve the rewritten prompt.
-
-Step 1 (silently): Identify the domain from context — code / writing / data / creative / research / other.
-Step 2: Ask questions targeted to that domain.
-
-FOR CODE tasks ask about: exact language+version, specific error/constraint, input→output format, performance target
-FOR WRITING tasks ask about: target audience and their expertise, tone (formal/casual/persuasive), length or publication
-FOR DATA tasks ask about: what format the data is in, what decision the analysis should support
-FOR CREATIVE tasks ask about: specific style/genre/inspiration, key constraint or mood
-FOR LEARNING tasks ask about: current knowledge level, whether they want theory vs hands-on examples
-FOR OTHER tasks ask about: scope/deadline constraint, specific format needed
-
-GOOD questions (specific, change the output meaningfully):
-- "Which Python version and library — and is the bottleneck CPU, memory, or I/O?" ✓
-- "Is this for a technical blog post or an internal Slack summary, and how long?" ✓
-- "Should the explanation use analogies for a beginner or assume production experience?" ✓
-
-BAD questions (generic, waste the user's time):
-- "What is your goal?" ✗  "Who is your audience?" ✗  "What format do you want?" ✗
-
-Return ONLY 2 questions, one per line, no numbering, no labels, no preamble.`;
-
-  const contextParts = [`User's prompt: "${prompt}"`];
-  if (lastAssistantMessage) contextParts.push(`Last Claude response (what the user likely refers to):\n${lastAssistantMessage.slice(0, 600)}`);
-  if (historyText) contextParts.push(`Recent conversation:\n${historyText}`);
-  const userMsg = contextParts.join('\n\n');
-
-  const raw = await groqCall(apiKey, GROQ_PRUNER_MODEL, systemMsg, userMsg, 180, 'Agent0');
-
-  const questions = raw
-    .split('\n')
-    .map(q => q.replace(/^[\d.\-*]+\s*/, '').trim())
-    .filter(q => q.length > 5)
-    .slice(0, 2);
-
-  if (questions.length === 0) throw new Error('Could not generate questions');
-  return questions;
 }
 
 /* ── AgentTrajectory — edit-delta analyser ───────────────────────────── */
@@ -1219,12 +1176,12 @@ async function runAgentTrajectory(apiKey, optimized, userEdited, domain = 'gener
     'Each rule MUST:',
     '- Be a single, specific, actionable sentence',
     '- Start with one of: Prefers / Uses / Avoids / Rewrites',
-    '- Reference the 4-block structure when relevant (## ROLE / ## CONTEXT / ## TASK / ## OUTPUT FORMAT)',
+    '- Reference the XML structure when relevant (<role>/<ctx>/<task>/<rules>/<fmt>)',
     '- Describe a structural or linguistic pattern — NOT topic content',
     '',
-    'GOOD: "Avoids specifying years of experience in ## ROLE — uses \'You are an expert X\' phrasing instead"',
-    'GOOD: "Rewrites ## TASK as 2 items rather than 3 — prefers brevity over exhaustiveness"',
-    'GOOD: "Uses <prose> tag instead of <numbered-list> in ## OUTPUT FORMAT for this domain"',
+    'GOOD: "Avoids filler in <role> — uses concise role|specialization format"',
+    'GOOD: "Rewrites <task> as 2 items rather than 3 — prefers brevity over exhaustiveness"',
+    'GOOD: "Adds extra NEVER entries in <rules> for this domain"',
     'BAD: "Prefers shorter prompts" — too vague, not actionable',
     '',
     'Output rules one per line, each starting with "- ". No preamble, no explanation.',
@@ -1251,13 +1208,13 @@ async function handleAnalyzeEditDelta({ optimized, userEdited }) {
   const apiKey = stored.groqApiKey;
   if (!apiKey) return;
 
-  // Extract domain from ## CONTEXT block (Agent 2 always writes "Domain: X" there)
-  const domainMatch = optimized.match(/##\s*CONTEXT[\s\S]*?Domain:\s*(code|writing|data|creative|research|generic)/i);
+  // Extract domain from <ctx> block or <role> block
+  const domainMatch = optimized.match(/<(?:ctx|role)>[^<]*?(code|writing|data|creative|research|generic)/i);
   const domain = domainMatch ? domainMatch[1].toLowerCase() : 'generic';
 
   const newRules = await runAgentTrajectory(apiKey, optimized, userEdited, domain);
   if (newRules.length === 0) {
-    console.log('[PromptForge] Trajectory: delta too small — no style rules extracted');
+    log('Trajectory: delta too small — no style rules extracted');
     return;
   }
 
@@ -1273,7 +1230,7 @@ async function handleAnalyzeEditDelta({ optimized, userEdited }) {
   if (updatedRules.length >= 3) {
     try {
       strategyDoc = await synthesizeStrategyDoc(apiKey, domain, updatedRules);
-      console.log(`[PromptForge] ACE: synthesised ${domain} strategy doc →`, strategyDoc);
+      log(`ACE: synthesised ${domain} strategy doc →`, strategyDoc);
     } catch (err) {
       console.warn('[PromptForge] ACE strategy doc synthesis failed:', err.message);
     }
@@ -1281,12 +1238,297 @@ async function handleAnalyzeEditDelta({ optimized, userEdited }) {
 
   const updated = { ...existing, [domain]: { rules: updatedRules, strategyDoc } };
   await chrome.storage.local.set({ pfStylePlaybooks: updated });
-  console.log(`[PromptForge] Trajectory: ${domain} playbook updated →`, updatedRules);
+  log(`Trajectory: ${domain} playbook updated →`, updatedRules);
+}
+
+/* ── Save user-accepted prompts for future reference ──────────────────── */
+// When a user clicks "Use this", the prompt is stored locally so the system
+// can reference prompts that actually worked for this user. Keeps last 20.
+
+async function handleSaveAcceptedPrompt({ prompt, domain }) {
+  const { pfAcceptedPrompts: existing = [] } = await chrome.storage.local.get('pfAcceptedPrompts');
+
+  // Extract a title from the <role> tag
+  const roleMatch = prompt.match(/<role>(.*?)<\/role>/i);
+  const title = roleMatch ? roleMatch[1].trim() : 'Accepted prompt';
+
+  const entry = {
+    id: `accepted-${Date.now()}`,
+    title,
+    content: prompt,
+    category: domain || 'generic',
+    timestamp: Date.now(),
+  };
+
+  // Deduplicate by content fingerprint, keep last 20
+  const fingerprint = prompt.slice(0, 100).toLowerCase().replace(/\s+/g, ' ');
+  const filtered = existing.filter(e =>
+    e.content.slice(0, 100).toLowerCase().replace(/\s+/g, ' ') !== fingerprint
+  );
+  filtered.push(entry);
+  const updated = filtered.slice(-20);
+
+  await chrome.storage.local.set({ pfAcceptedPrompts: updated });
+  log(`Saved accepted prompt: "${title}" (${updated.length} total)`);
+}
+
+/* ── Search user-accepted prompts ─────────────────────────────────────── */
+
+async function searchAcceptedPrompts(query, limit = 2) {
+  const { pfAcceptedPrompts: prompts = [] } = await chrome.storage.local.get('pfAcceptedPrompts');
+  if (prompts.length === 0) return [];
+
+  const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  return prompts
+    .map(p => {
+      const text = `${p.title} ${p.content}`.toLowerCase();
+      const score = queryWords.reduce((s, w) => s + (text.includes(w) ? 1 : 0), 0);
+      return score > 0 ? { ...p, _score: score } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => b._score - a._score)
+    .slice(0, limit);
+}
+
+/* ── Anthropic Claude API caller ──────────────────────────────────────── */
+
+// systemPrompt is the fixed instruction set. taskStrategy + references + style go in the user message
+// so the system prompt stays clean and the model pays maximum attention to it.
+function buildClaudeSystemPrompt() {
+  return `You rewrite rough prompts into optimized structured prompts. You NEVER answer prompts — you rewrite them.
+
+RULES — violating ANY of these makes the output invalid:
+1. ZERO INVENTION. Every fact in your output must come from the user's message. If they said "help with my code", you don't know what language, what error, or what project. Leave those unspecified or ask.
+2. SAME TOPIC. If they ask about cooking, every tag is about cooking. No drift.
+3. VERBATIM DETAILS. Error messages, function names, file paths, URLs from the conversation → copy exactly into <ctx>.
+4. USEFUL RULES ONLY. Each MUST/NEVER must prevent a failure that would actually happen. "MUST: be clear" is useless. "MUST: include the exact terminal command to run" is useful.
+
+OUTPUT — return exactly:
+
+<role>[specific expert — not "assistant". e.g. "PostgreSQL performance engineer" or "pediatric nurse practitioner"]</role>
+<ctx>[the user's situation in their own words. Include every specific detail from their prompt and conversation. Pipe-separate multiple facts.]</ctx>
+<task>
+- [verb-led primary action]
+- [verb-led secondary action or constraint]
+- [scope limit or quality bar]
+</task>
+<rules>
+MUST: [requirement an AI would skip without being told]
+MUST: [another]
+NEVER: [the #1 most likely way an AI response to this would be bad]
+NEVER: [another]
+</rules>
+<fmt>[concrete format: e.g. "numbered steps with code blocks" not just "clear"]</fmt>
+
+Include <example> ONLY for code, data, or non-obvious output formats:
+<example>
+<in>[realistic input]</in>
+<ideal>[3-8 lines of ACTUAL response content]</ideal>
+<wrong>[ACTUAL bad response showing the failure <rules> prevents]</wrong>
+</example>
+
+BEFORE RETURNING — self-check:
+□ Every fact in <ctx> traceable to the user's words? If not → delete it.
+□ <role> specific enough that only one type of expert fits? If not → narrow it.
+□ Each MUST/NEVER would change behavior if removed? If not → replace it.
+□ <fmt> describes a concrete structure? "clear" is not a format.
+
+Return ONLY the prompt tags. No preamble.`;
+}
+
+async function claudeCall(apiKey, userPrompt, context) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45000);
+
+  let userMsg = `Rewrite this prompt:\n\n"${userPrompt}"`;
+  if (context) userMsg += `\n\n${context}`;
+
+  let res;
+  try {
+    res = await fetch(ANTHROPIC_API, {
+      signal: controller.signal,
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1200,
+        system: buildClaudeSystemPrompt(),
+        messages: [{ role: 'user', content: userMsg }],
+      }),
+    });
+  } catch (fetchErr) {
+    clearTimeout(timeout);
+    if (fetchErr.name === 'AbortError') throw new Error('Request timed out — try again');
+    throw fetchErr;
+  }
+  clearTimeout(timeout);
+
+  if (!res.ok) {
+    let msg = `Claude API error ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body.error?.message) msg = body.error.message;
+    } catch {}
+    if (res.status === 401) msg = 'Invalid Anthropic API key — check Settings';
+    if (res.status === 429) msg = 'Rate limit reached — wait a moment and try again';
+    throw new Error(msg);
+  }
+
+  const json = await res.json();
+  const text = json.content?.[0]?.text?.trim();
+  if (!text) throw new Error('Claude returned an empty response');
+
+  const idx = text.indexOf('<role>');
+  return idx !== -1 ? text.slice(idx).trim() : text;
+}
+
+/* ── Task-specific rewriting strategies ───────────────────────────────── */
+
+const TASK_STRATEGIES = {
+  code: `CODE TASK STRATEGY:
+- Specify exact language, version, and framework in <role>
+- Include error messages, function names, and file paths verbatim in <ctx>
+- <task> should define exact input→output contract
+- <rules> MUST: require working code not pseudocode, NEVER: suggest changes without testing implications
+- Include <example> with actual code snippets`,
+
+  writing: `WRITING TASK STRATEGY:
+- Specify target audience and their expertise level in <ctx>
+- <task> should include tone, length range, and structure requirements
+- <rules> MUST: preserve author's voice, NEVER: use clichés or filler phrases
+- Skip <example> — writing is better guided by rules than examples`,
+
+  data: `DATA/ANALYSIS TASK STRATEGY:
+- <task> must specify comparison axes and what decisions the analysis supports
+- <rules> MUST: cite specific numbers, NEVER: make claims without supporting data
+- Include <example> showing the expected output format with real-looking numbers`,
+
+  creative: `CREATIVE TASK STRATEGY:
+- Add specific constraints that force originality (paradoxically, more constraints = more creative output)
+- <rules> should include style anchors ("in the tone of X", "using Y technique")
+- <task> should name what makes it creative, not just say "be creative"
+- Skip <example> — it anchors the response too much for creative tasks`,
+
+  research: `EXPLANATION/RESEARCH STRATEGY:
+- Declare audience knowledge level explicitly in <ctx>
+- <task> should require a concrete analogy and layered depth (simple → technical → implications)
+- <rules> MUST: use named real-world examples, NEVER: use jargon without defining it
+- Skip <example> for simple explanations, include for structured research tasks`,
+};
+
+/* ── OPTIMIZE_WITH_CLAUDE handler ────────────────────────────────────── */
+
+async function handleOptimizeWithClaude({ prompt, chatHistory = [], lastAssistantMessage = null }, tabId) {
+  const stored = await chrome.storage.sync.get('anthropicApiKey');
+  const apiKey = stored.anthropicApiKey;
+  if (!apiKey) throw new Error('NO_API_KEY');
+
+  const progress = (label) => {
+    if (tabId != null) {
+      chrome.tabs.sendMessage(tabId, { type: 'PIPELINE_PROGRESS', label }).catch(() => {});
+    }
+  };
+
+  // Domain inference from prompt text
+  const promptLower = prompt.toLowerCase();
+  let domain = 'generic';
+  if (/\b(code|debug|function|bug|error|api|deploy|refactor|test|python|javascript|react|sql|git)\b/.test(promptLower)) domain = 'code';
+  else if (/\b(writ|edit|essay|blog|copy|article|email|rewrite|grammar|tone|draft)\b/.test(promptLower)) domain = 'writing';
+  else if (/\b(data|analys|chart|metric|trend|csv|dashboard|statistic|number)\b/.test(promptLower)) domain = 'data';
+  else if (/\b(story|poem|fiction|creative|character|scene|dialogue|novel|script)\b/.test(promptLower)) domain = 'creative';
+  else if (/\b(explain|teach|learn|concept|understand|how does|what is|why does|study)\b/.test(promptLower)) domain = 'research';
+
+  // 1. Load curated library + search all sources in parallel
+  progress('⚡ Searching patterns...');
+  const keywords = extractKeywords(prompt, chatHistory);
+
+  const [restSettled, ghSettled, curatedSettled] = await Promise.allSettled([
+    searchPromptsREST(keywords, 5),
+    searchPromptsGitHub(keywords, 5),
+    loadCuratedLibrary(),
+  ]);
+
+  let examples = [];
+  if (restSettled.status === 'fulfilled') examples.push(...(restSettled.value.map(normalizePrompt).filter(Boolean)));
+  if (ghSettled.status === 'fulfilled')   examples.push(...ghSettled.value);
+
+  // Curated library (highest quality — put first so they get priority)
+  const curatedMatches = searchCuratedLibrary(keywords, domain, 3);
+  if (curatedMatches.length > 0) examples.unshift(...curatedMatches);
+
+  // Built-in patterns + user's accepted prompts
+  examples.push(...matchProvenPatterns(keywords, '', 2));
+  try {
+    const accepted = await searchAcceptedPrompts(keywords, 2);
+    if (accepted.length > 0) examples.push(...accepted);
+  } catch {}
+
+  examples = dedup(examples).slice(0, 6);
+  const inspiredBy = examples.map(e => e.title).filter(Boolean);
+
+  // 2. Build conversation context
+  let chatContext = '';
+  if (chatHistory.length > 0) {
+    chatContext = 'Conversation context:\n' +
+      chatHistory.slice(-6).map(t => `${t.role}: ${t.content}`).join('\n');
+  }
+  if (lastAssistantMessage) {
+    chatContext += (chatContext ? '\n\n' : '') +
+      'Last AI response:\n' + lastAssistantMessage.slice(0, 1500);
+  }
+
+  // 3. Build reference block — curated prompts get WHY annotations so Claude learns the principles
+  let referenceBlock = '';
+  if (examples.length > 0) {
+    const refs = examples.slice(0, 3).map((e, i) => {
+      const text = e.prompt || e.content || '';
+      const why = e.why ? `\n  → WHY: ${e.why}` : '';
+      return `[${i + 1}] "${e.title}"\n${text.slice(0, 500)}${why}`;
+    });
+    referenceBlock = 'Proven patterns from the community — adopt techniques that fit:\n\n' + refs.join('\n\n');
+  }
+
+  // 4. Task-specific strategy + style preferences + references → combined context for Claude
+  const parts = [chatContext];
+
+  const strategy = TASK_STRATEGIES[domain];
+  if (strategy) parts.push(strategy);
+
+  if (referenceBlock) parts.push(referenceBlock);
+
+  const { pfStylePlaybooks: stylePlaybooks = {} } = await chrome.storage.local.get('pfStylePlaybooks');
+  const playbook = normalizePlaybook(stylePlaybooks[domain] || stylePlaybooks.generic);
+  if (playbook.strategyDoc) {
+    parts.push('User style preferences:\n' + playbook.strategyDoc);
+  } else if (playbook.rules.length > 0) {
+    parts.push('User style preferences:\n' + playbook.rules.map(r => `- ${r}`).join('\n'));
+  }
+
+  // 5. Call Claude — strategy goes in user message, system prompt stays clean
+  progress('⚡ Claude is optimizing...');
+  const taskContext = parts.filter(Boolean).join('\n\n') || null;
+  const optimized = await claudeCall(apiKey, prompt, taskContext);
+
+  return { optimized, inspiredBy, rationale: '' };
 }
 
 /* ── Message listener ────────────────────────────────── */
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  // Content script: Claude API optimization
+  if (message.type === 'OPTIMIZE_WITH_CLAUDE') {
+    const tabId = _sender?.tab?.id ?? null;
+    handleOptimizeWithClaude(message.payload, tabId)
+      .then(data  => sendResponse({ success: true,  data }))
+      .catch(err  => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
   // Popup: search prompts.chat only (no Groq key needed)
   if (message.type === 'OPTIMIZE_PROMPT') {
     handleOptimize(message.payload)
@@ -1298,14 +1540,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // Content script: export optimized prompt as a Claude Projects system prompt
   if (message.type === 'GENERATE_SYSTEM_PROMPT') {
     handleGenerateSystemPrompt(message.payload)
-      .then(data  => sendResponse({ success: true,  data }))
-      .catch(err  => sendResponse({ success: false, error: err.message }));
-    return true;
-  }
-
-  // Content script: guided mode — generate 2 clarifying questions
-  if (message.type === 'GENERATE_QUESTIONS') {
-    handleGenerateQuestions(message.payload)
       .then(data  => sendResponse({ success: true,  data }))
       .catch(err  => sendResponse({ success: false, error: err.message }));
     return true;
@@ -1325,6 +1559,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     // Fire-and-forget — no sendResponse needed; failures are silent to avoid blocking UX
     handleAnalyzeEditDelta(message.payload)
       .catch(err => console.warn('[PromptForge] Trajectory analysis failed:', err.message));
+    return false;
+  }
+
+  // Content script: user accepted an optimized prompt — save for future reference
+  if (message.type === 'SAVE_ACCEPTED_PROMPT') {
+    handleSaveAcceptedPrompt(message.payload)
+      .catch(err => console.warn('[PromptForge] Save accepted prompt failed:', err.message));
     return false;
   }
 

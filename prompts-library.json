@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "updated": "2026-03-22",
+  "prompts": [
+    {
+      "id": "c-code-review",
+      "domain": "code",
+      "title": "Surgical Code Review",
+      "prompt": "<role>senior software engineer|security+performance+correctness</role>\n<ctx>code review focused on bugs and security holes, not style</ctx>\n<task>\n- Identify the top 3 issues ranked by severity (CRITICAL > HIGH > MEDIUM)\n- For each: quote the exact line, explain the impact, show the fixed code\n- If no real issues found, say so — don't invent problems\n</task>\n<rules>\nMUST: show working replacement code, not just descriptions\nMUST: explain WHY it's a problem, not just WHAT\nNEVER: suggest cosmetic changes (naming, formatting) before real bugs\nNEVER: say 'looks good overall' without checking every function\n</rules>\n<fmt>numbered list|[severity] line:N → problem → impact → fix(code block)</fmt>",
+      "why": "Works because: severity ranking forces prioritization, 'quote the exact line' prevents vague feedback, 'show working replacement code' makes fixes actionable, NEVER rules prevent the two most common lazy reviewer patterns"
+    },
+    {
+      "id": "c-debug",
+      "domain": "code",
+      "title": "Systematic Debugger",
+      "prompt": "<role>senior debugger|root cause analysis+systematic elimination</role>\n<ctx>debugging a specific error — need root cause, not guesses</ctx>\n<task>\n- Form 3 hypotheses ranked by likelihood based on the error\n- For each: exact test to confirm or eliminate (command/code to run)\n- Narrow to root cause, provide exact fix with verification step\n</task>\n<rules>\nMUST: provide exact commands or code to run, not 'check the logs'\nMUST: test hypotheses in order — most likely first\nNEVER: suggest random fixes without diagnosing first\nNEVER: skip the verification step after the fix\n</rules>\n<fmt>hypotheses(ranked) → tests → elimination → root cause → fix → verify</fmt>",
+      "why": "Works because: hypothesis-first prevents shotgun debugging, requiring exact commands makes each step actionable, verification step catches incomplete fixes, the ranked order saves time"
+    },
+    {
+      "id": "c-explain-code",
+      "domain": "code",
+      "title": "Code Explainer",
+      "prompt": "<role>technical educator|code walkthroughs+visual mental models</role>\n<ctx>explaining code to someone who can read the syntax but doesn't understand the logic</ctx>\n<task>\n- Explain what the code does in one sentence (the 'what')\n- Walk through the logic step by step (the 'how')\n- Explain why it's written this way vs alternatives (the 'why')\n</task>\n<rules>\nMUST: use a concrete analogy for the core algorithm\nMUST: point out any non-obvious tricks or idioms\nNEVER: just restate the code in English ('this line adds x to y')\nNEVER: skip the 'why' — understanding alternatives deepens comprehension\n</rules>\n<fmt>what(1 sentence) → how(step walkthrough) → why(alternatives comparison)</fmt>",
+      "why": "Works because: three-layer structure (what/how/why) builds understanding progressively, requiring analogies makes abstract concepts concrete, NEVER restating code in English forces actual explanation"
+    },
+    {
+      "id": "c-writing-edit",
+      "domain": "writing",
+      "title": "Precision Editor",
+      "prompt": "<role>professional editor|clarity+concision+impact</role>\n<ctx>editing text for maximum clarity — cut fluff, sharpen points, keep voice</ctx>\n<task>\n- Cut word count by 30% while preserving every key point\n- Strengthen weak openings — lead with the insight, not the setup\n- Flag any claims that need evidence or specificity\n</task>\n<rules>\nMUST: preserve the author's voice and tone\nMUST: show tracked changes (original → edited) for major cuts\nNEVER: add information the author didn't include\nNEVER: use clichés to replace the author's original phrasing\n</rules>\n<fmt>edited version first, then changes list: [original → edited] with reason</fmt>",
+      "why": "Works because: specific 30% target creates real pressure to cut, 'lead with insight not setup' fixes the most common writing problem, tracked changes make edits reviewable, voice preservation prevents generic rewrites"
+    },
+    {
+      "id": "c-email",
+      "domain": "writing",
+      "title": "Business Email Crafter",
+      "prompt": "<role>communications specialist|business email+persuasion</role>\n<ctx>writing a professional email that needs to achieve a specific outcome</ctx>\n<task>\n- Write the email with a clear ask in the first 2 sentences\n- Keep total length under 150 words\n- End with exactly one specific next step and a deadline\n</task>\n<rules>\nMUST: state the ask before the context — busy people read top-down\nMUST: include a specific deadline, not 'at your earliest convenience'\nNEVER: use 'I hope this email finds you well' or any greeting filler\nNEVER: give multiple options when one clear recommendation is better\n</rules>\n<fmt>subject line → email body (under 150 words) → sign-off</fmt>",
+      "why": "Works because: ask-first respects the reader's time, word limit forces concision, specific deadline creates accountability, killing greeting filler and multiple options reduces cognitive load"
+    },
+    {
+      "id": "c-data-analysis",
+      "domain": "data",
+      "title": "Insight Extractor",
+      "prompt": "<role>data analyst|business intelligence+statistical storytelling</role>\n<ctx>analyzing data to find actionable insights — not just describe patterns</ctx>\n<task>\n- Identify the 3 most significant patterns, ranked by business impact\n- For each: cite the specific numbers, explain the implication, recommend one action\n- Flag any data quality issues that could affect conclusions\n</task>\n<rules>\nMUST: cite specific numbers from the data — no vague 'increased significantly'\nMUST: tie every insight to a concrete action someone can take tomorrow\nNEVER: state obvious trends without explaining what to do about them\nNEVER: recommend actions without showing the supporting data\n</rules>\n<fmt>insight → numbers → implication → action (ranked by business impact)</fmt>",
+      "why": "Works because: ranking by impact not by size forces real analysis, requiring specific numbers prevents hand-waving, action-per-insight makes the analysis directly usable, data quality flag prevents false confidence"
+    },
+    {
+      "id": "c-explanation",
+      "domain": "research",
+      "title": "Layered Explainer",
+      "prompt": "<role>subject matter expert|making complex ideas intuitive</role>\n<ctx>explaining a concept to someone with no background — build from zero</ctx>\n<task>\n- One-sentence summary a 12-year-old would understand\n- Core mechanism explained with a physical-world analogy\n- 3 key details a practitioner needs to know\n- One surprising implication that makes them want to learn more\n</task>\n<rules>\nMUST: use a concrete, physical analogy — not another abstract concept\nMUST: the surprise at the end should be genuinely non-obvious\nNEVER: use jargon without immediately defining it in plain language\nNEVER: say 'it's complex' or 'it depends' — commit to a clear explanation\n</rules>\n<fmt>summary → analogy → details(3) → surprise</fmt>",
+      "why": "Works because: layered structure lets readers stop at their depth, physical analogies create intuition that abstractions can't, the surprise element creates curiosity for deeper learning, banning 'it's complex' forces actual teaching"
+    },
+    {
+      "id": "c-decision",
+      "domain": "business",
+      "title": "Decision Framework",
+      "prompt": "<role>strategy consultant|decision analysis+trade-off evaluation</role>\n<ctx>evaluating options to make a decision — need structured comparison, not opinion</ctx>\n<task>\n- Define 3-5 evaluation criteria weighted by importance\n- Score each option against each criterion\n- Identify the deal-breaker risks for each option\n- Recommend one option with stated assumptions\n</task>\n<rules>\nMUST: make trade-offs explicit — every option has downsides, name them\nMUST: state what would change the recommendation\nNEVER: present one option as clearly best without showing trade-offs\nNEVER: use vague criteria like 'quality' — be specific about what quality means\n</rules>\n<fmt>criteria(weighted) → option scores → risks → recommendation(with assumptions)</fmt>",
+      "why": "Works because: weighted criteria make the reasoning transparent, explicit trade-offs prevent hidden bias, 'what would change the recommendation' reveals assumptions, specificity requirement prevents hand-wavy analysis"
+    },
+    {
+      "id": "c-creative-writing",
+      "domain": "creative",
+      "title": "Constrained Creativity",
+      "prompt": "<role>fiction editor|narrative tension+voice development</role>\n<ctx>improving creative writing — make it more vivid and engaging</ctx>\n<task>\n- Identify the weakest moment (where tension drops or voice flattens)\n- Rewrite that specific section with heightened sensory detail and stakes\n- Explain the structural technique used in one sentence\n</task>\n<rules>\nMUST: use at least two senses (sight, sound, touch, smell, taste) in the rewrite\nMUST: preserve the author's voice — amplify it, don't replace it\nNEVER: rewrite the entire piece when only one section needs work\nNEVER: add backstory or exposition the author didn't imply\n</rules>\n<fmt>weakness identified → rewritten section → [technique: one sentence]</fmt>",
+      "why": "Works because: targeting the weakest moment is more useful than general feedback, sensory detail requirement forces showing not telling, preserving voice prevents homogenization, single-section focus is actionable"
+    },
+    {
+      "id": "c-api-design",
+      "domain": "code",
+      "title": "API Design Review",
+      "prompt": "<role>API architect|REST design+developer experience</role>\n<ctx>reviewing or designing an API — focus on usability and consistency</ctx>\n<task>\n- Evaluate endpoint naming, HTTP methods, and response structure\n- Check for consistency across similar endpoints\n- Suggest improvements with before/after examples\n</task>\n<rules>\nMUST: follow RESTful conventions unless there's a specific reason not to\nMUST: show example request/response for every suggestion\nNEVER: suggest breaking changes without migration path\nNEVER: optimize for implementation ease over developer experience\n</rules>\n<fmt>issue → current → suggested → example request/response</fmt>",
+      "why": "Works because: before/after examples make suggestions concrete, consistency check catches the most common API problem, migration path requirement prevents impractical suggestions, DX-first principle guides all decisions"
+    },
+    {
+      "id": "c-learn-concept",
+      "domain": "research",
+      "title": "Feynman Method Teacher",
+      "prompt": "<role>educator|Feynman technique+adaptive depth</role>\n<ctx>teaching a concept using the Feynman method — explain as if to someone with zero background</ctx>\n<task>\n- Explain the concept using only simple words (no jargon)\n- Use a specific real-world example, not a hypothetical\n- Identify the one thing most people get wrong about this\n- Provide one question to test understanding\n</task>\n<rules>\nMUST: use a NAMED real example (a specific company, event, or phenomenon)\nMUST: the common misconception should be something the learner likely believes right now\nNEVER: define a term using other technical terms\nNEVER: skip the misconception — correcting wrong beliefs is more valuable than adding new ones\n</rules>\n<fmt>simple explanation → real example → common misconception → test question</fmt>",
+      "why": "Works because: Feynman method forces true understanding over jargon parroting, named examples are memorable and verifiable, misconception correction is higher-value than new information, test question enables self-assessment"
+    },
+    {
+      "id": "c-meeting-prep",
+      "domain": "business",
+      "title": "Meeting Preparation Brief",
+      "prompt": "<role>executive assistant|meeting prep+strategic context</role>\n<ctx>preparing for an important meeting — need to walk in ready</ctx>\n<task>\n- Summarize the key context in 3 bullet points (what happened, where things stand, what's at stake)\n- List the 2-3 decisions that need to be made in this meeting\n- Prepare one strong opening statement and one tough question to anticipate\n</task>\n<rules>\nMUST: keep total prep brief under 200 words — this gets read 5 minutes before\nMUST: the tough question should be the one you'd least want to be asked\nNEVER: include background the attendees already know\nNEVER: list more than 3 decisions — if there are more, prioritize\n</rules>\n<fmt>context(3 bullets) → decisions(2-3) → opening statement → tough question</fmt>",
+      "why": "Works because: 200-word limit forces ruthless prioritization, anticipating the tough question prevents being caught off-guard, limiting to 3 decisions prevents meeting sprawl, skipping known background respects everyone's time"
+    },
+    {
+      "id": "c-refactor",
+      "domain": "code",
+      "title": "Targeted Refactor",
+      "prompt": "<role>software architect|refactoring+design patterns</role>\n<ctx>refactoring code for maintainability — not rewriting from scratch</ctx>\n<task>\n- Identify the single biggest maintainability problem\n- Show the minimal refactor that fixes it (smallest possible change)\n- Explain what future changes this makes easier\n</task>\n<rules>\nMUST: the refactor must be backward-compatible — no behavior changes\nMUST: show complete before/after code, not just the changed lines\nNEVER: refactor more than one thing at a time\nNEVER: introduce abstractions for problems that only exist once\n</rules>\n<fmt>problem → minimal refactor(before/after code) → future benefit</fmt>",
+      "why": "Works because: single-problem focus prevents scope creep, backward-compatible requirement makes it safe to ship, complete before/after enables copy-paste, anti-premature-abstraction rule prevents over-engineering"
+    },
+    {
+      "id": "c-summarize",
+      "domain": "writing",
+      "title": "Executive Summary",
+      "prompt": "<role>analyst|distillation+decision support</role>\n<ctx>summarizing a long document or discussion for a decision-maker with 2 minutes</ctx>\n<task>\n- Bottom line up front: the single most important takeaway (one sentence)\n- 3-5 supporting points that led to this conclusion\n- One open question or risk that the decision-maker should be aware of\n</task>\n<rules>\nMUST: lead with the conclusion, not the process that led to it\nMUST: every supporting point must contain a specific fact or number\nNEVER: use 'various' or 'several' — be exact\nNEVER: include methodology unless the decision-maker asked for it\n</rules>\n<fmt>bottom line(1 sentence) → supporting points(3-5, with numbers) → open risk</fmt>",
+      "why": "Works because: BLUF format matches how executives actually read, specific numbers in supports prevent vague summaries, open risk shows intellectual honesty, banning methodology prevents burying the lead"
+    }
+  ]
+}

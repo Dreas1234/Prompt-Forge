@@ -5,6 +5,9 @@
 (function promptForge() {
   'use strict';
 
+  const PF_DEBUG = false;
+  const pfLog = (...args) => { if (PF_DEBUG) console.log('[PromptForge]', ...args); };
+
   // Prevent double-injection on hot reloads
   if (window.__pfInjected) return;
   window.__pfInjected = true;
@@ -16,81 +19,57 @@
   /* ── Styles injected into the host page ───────────────────────────────── */
 
   const CSS = `
-    #pf-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      padding: 0 12px;
-      height: 32px;
-      background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%);
-      border: none;
-      border-radius: 8px;
-      color: #fff;
-      font-size: 12px;
-      font-weight: 600;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      cursor: pointer;
-      white-space: nowrap;
-      flex-shrink: 0;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 0.18s ease, transform 0.1s ease, filter 0.15s ease;
-      box-shadow: 0 2px 8px rgba(124,58,237,0.4);
-      vertical-align: middle;
-      line-height: 1;
-      margin-right: 6px;
+    /* ── Design tokens ─────────────────────────────────────────────────── */
+    :root {
+      --pf-bg-deep: #09090f;
+      --pf-bg-panel: #0f0f1a;
+      --pf-bg-surface: rgba(255,255,255,0.03);
+      --pf-bg-surface-hover: rgba(255,255,255,0.06);
+      --pf-border: rgba(255,255,255,0.06);
+      --pf-border-focus: rgba(139,92,246,0.45);
+      --pf-accent: #8b5cf6;
+      --pf-accent-dim: rgba(139,92,246,0.15);
+      --pf-accent-glow: rgba(139,92,246,0.3);
+      --pf-text-primary: #f1f5f9;
+      --pf-text-secondary: #94a3b8;
+      --pf-text-muted: #64748b;
+      --pf-font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif;
+      --pf-font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+      --pf-radius-panel: 12px;
+      --pf-radius-btn: 8px;
+      --pf-shadow-panel: 0 8px 32px rgba(0,0,0,0.4);
+      --pf-transition: 0.15s ease;
     }
-    #pf-btn.pf-visible {
-      opacity: 1;
-      pointer-events: auto;
-    }
-    #pf-btn:hover {
-      filter: brightness(1.12);
-      transform: translateY(-1px);
-    }
-    #pf-btn:active {
-      transform: translateY(0);
-    }
-    #pf-btn.pf-loading {
-      opacity: 0.65;
-      pointer-events: none;
-      cursor: wait;
-    }
-    #pf-btn.pf-loading .pf-bolt { display: none; }
-    #pf-btn.pf-loading .pf-spinner { display: block; }
-    .pf-spinner {
-      display: none;
-      width: 11px;
-      height: 11px;
-      border: 1.8px solid rgba(255,255,255,0.3);
-      border-top-color: #fff;
-      border-radius: 50%;
-      animation: pf-spin 0.6s linear infinite;
-      flex-shrink: 0;
-    }
-    @keyframes pf-spin { to { transform: rotate(360deg); } }
 
-    /* Toast */
+    @keyframes pf-pulse {
+      0%, 100% { opacity: 1; box-shadow: 0 4px 12px var(--pf-accent-glow); }
+      50%      { opacity: 0.7; box-shadow: 0 4px 20px rgba(139,92,246,0.5); }
+    }
+
+    /* ── Toast ──────────────────────────────────────────────────────────── */
     #pf-toast {
       position: fixed;
       bottom: 90px;
       left: 50%;
-      transform: translateX(-50%) translateY(6px);
+      transform: translateX(-50%) translateY(12px);
       max-width: 380px;
       padding: 10px 16px;
-      background: #1a1a2e;
-      color: #e2e8f0;
-      border: 1px solid #7c3aed;
+      background: rgba(15,15,26,0.92);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      color: var(--pf-text-primary);
+      border: 1px solid var(--pf-border);
+      border-left: 3px solid var(--pf-accent);
       border-radius: 10px;
       font-size: 13px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-family: var(--pf-font-sans);
       line-height: 1.45;
       text-align: center;
-      box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+      box-shadow: var(--pf-shadow-panel);
       z-index: 2147483647;
       opacity: 0;
       pointer-events: none;
-      transition: opacity 0.2s ease, transform 0.2s ease;
+      transition: opacity 0.2s ease, transform 0.25s ease;
     }
     #pf-toast.pf-show {
       opacity: 1;
@@ -98,16 +77,17 @@
       transform: translateX(-50%) translateY(0);
     }
     #pf-toast.pf-error {
-      border-color: #ef4444;
+      border-left-color: #ef4444;
       color: #fca5a5;
     }
     #pf-toast.pf-success {
-      border-color: #10b981;
+      border-left-color: #10b981;
       color: #6ee7b7;
     }
     #pf-toast a, #pf-toast button.pf-link {
-      color: #a78bfa;
+      color: var(--pf-accent);
       text-decoration: underline;
+      text-underline-offset: 2px;
       cursor: pointer;
       background: none;
       border: none;
@@ -121,22 +101,24 @@
       position: absolute;
       bottom: calc(100% + 10px);
       right: 0;
-      width: 200px;
+      width: 190px;
       padding: 8px 10px;
-      background: #1a1a2e;
-      color: #e2e8f0;
-      border: 1px solid rgba(124,58,237,0.5);
-      border-radius: 8px;
+      background: rgba(15,15,26,0.92);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      color: var(--pf-text-secondary);
+      border: 1px solid var(--pf-border);
+      border-radius: var(--pf-radius-btn);
       font-size: 11px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-family: var(--pf-font-sans);
       font-weight: 400;
       line-height: 1.45;
       white-space: normal;
       text-align: left;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+      box-shadow: var(--pf-shadow-panel);
       pointer-events: none;
       opacity: 0;
-      transition: opacity 0.2s;
+      transition: opacity 0.15s ease;
       z-index: 10000;
     }
     #pf-optimize-btn[data-pf-tip]:hover::after { opacity: 1; }
@@ -148,39 +130,48 @@
       right: 20px;
       width: 380px;
       max-width: calc(100vw - 40px);
-      background: #1a1a2e;
-      border: 1px solid #7c3aed;
-      border-radius: 12px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      color: #e2e8f0;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+      background: var(--pf-bg-panel);
+      border: 1px solid var(--pf-border);
+      border-top: 2px solid var(--pf-accent);
+      border-radius: var(--pf-radius-panel);
+      font-family: var(--pf-font-sans);
+      color: var(--pf-text-primary);
+      box-shadow: var(--pf-shadow-panel);
       z-index: 2147483647;
+      overflow: hidden;
     }
     #pf-diff-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 10px 14px;
-      border-bottom: 1px solid rgba(124,58,237,0.25);
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--pf-border);
       font-size: 12px;
       font-weight: 600;
-      color: #a78bfa;
+      color: var(--pf-text-primary);
     }
     #pf-diff-close {
-      background: none;
-      border: none;
-      color: #64748b;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      background: var(--pf-bg-surface);
+      border: 1px solid var(--pf-border);
+      border-radius: 6px;
+      color: var(--pf-text-muted);
       cursor: pointer;
-      font-size: 15px;
+      font-size: 13px;
       line-height: 1;
       padding: 0;
+      transition: color var(--pf-transition), background var(--pf-transition);
     }
-    #pf-diff-close:hover { color: #e2e8f0; }
+    #pf-diff-close:hover { color: var(--pf-text-primary); background: var(--pf-bg-surface-hover); }
     #pf-diff-body {
-      padding: 12px 14px;
+      padding: 14px 16px;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 12px;
     }
     .pf-diff-label {
       font-size: 10px;
@@ -189,143 +180,99 @@
       letter-spacing: 0.08em;
       margin-bottom: 5px;
     }
-    .pf-diff-label.pf-before { color: #64748b; }
+    .pf-diff-label.pf-before { color: var(--pf-text-muted); }
     .pf-diff-label.pf-after  { color: #34d399; }
     .pf-diff-text {
       max-height: 88px;
       overflow-y: auto;
-      background: rgba(255,255,255,0.04);
-      border-radius: 6px;
-      padding: 8px 10px;
-      font-size: 12px;
-      line-height: 1.5;
-      color: #94a3b8;
+      background: var(--pf-bg-surface);
+      border: 1px solid var(--pf-border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 11.5px;
+      line-height: 1.55;
+      color: var(--pf-text-secondary);
       white-space: pre-wrap;
       word-break: break-word;
     }
-    .pf-diff-after-text { color: #e2e8f0; max-height: none; overflow: visible; }
+    .pf-diff-after-text {
+      color: var(--pf-text-primary);
+      max-height: none;
+      overflow: visible;
+      background: rgba(9,9,15,0.6);
+      font-family: var(--pf-font-mono);
+      font-size: 11px;
+      line-height: 1.55;
+    }
     #pf-diff-footer {
       display: flex;
       gap: 8px;
       justify-content: flex-end;
-      padding: 10px 14px;
-      border-top: 1px solid rgba(124,58,237,0.25);
+      padding: 12px 16px;
+      border-top: 1px solid var(--pf-border);
     }
     .pf-diff-btn {
-      padding: 6px 14px;
-      border-radius: 6px;
+      padding: 7px 16px;
+      border-radius: var(--pf-radius-btn);
       border: none;
       cursor: pointer;
       font-size: 12px;
       font-weight: 600;
       font-family: inherit;
-      transition: filter 0.15s;
+      transition: background var(--pf-transition), transform var(--pf-transition), box-shadow var(--pf-transition);
     }
-    .pf-diff-btn:hover { filter: brightness(1.15); }
-    #pf-diff-keep  { background: rgba(255,255,255,0.07); color: #94a3b8; }
-    #pf-diff-use   { background: linear-gradient(135deg,#7c3aed,#4f46e5); color: #fff; }
-    #pf-diff-retry { background: none; border: 1px solid rgba(124,58,237,0.35); color: #a78bfa; margin-right: auto; }
-    #pf-diff-retry:hover { background: rgba(124,58,237,0.12); filter: none; }
+    .pf-diff-btn:hover { transform: translateY(-1px); }
+    .pf-diff-btn:active { transform: translateY(0); }
+    #pf-diff-keep  { background: var(--pf-bg-surface-hover); color: var(--pf-text-secondary); border: 1px solid var(--pf-border); }
+    #pf-diff-keep:hover { background: rgba(255,255,255,0.08); }
+    #pf-diff-use   { background: var(--pf-accent); color: #fff; box-shadow: 0 2px 8px var(--pf-accent-glow); }
+    #pf-diff-use:hover { box-shadow: 0 4px 16px rgba(139,92,246,0.4); }
+    #pf-diff-retry { background: none; border: 1px solid var(--pf-border); color: var(--pf-text-secondary); margin-right: auto; }
+    #pf-diff-retry:hover { background: var(--pf-bg-surface); color: var(--pf-text-primary); }
     /* Word-level diff highlights */
-    .pf-diff-ins { background: rgba(52,211,153,0.18); color: #34d399; border-radius: 2px; padding: 0 1px; }
-    .pf-diff-del { background: rgba(239,68,68,0.15);  color: #f87171; border-radius: 2px; padding: 0 1px; text-decoration: line-through; }
+    .pf-diff-ins { background: rgba(52,211,153,0.12); color: #6ee7b7; border-radius: 2px; padding: 0 2px; }
+    .pf-diff-del { background: rgba(239,68,68,0.10);  color: #fca5a5; border-radius: 2px; padding: 0 2px; text-decoration: line-through; }
 
     /* Inline-editable After box */
-    .pf-diff-after-text[contenteditable] { cursor: text; caret-color: #a78bfa; }
-    .pf-diff-after-text[contenteditable]:focus { outline: 1px solid rgba(124,58,237,0.55); border-radius: 6px; }
+    .pf-diff-after-text[contenteditable] { cursor: text; caret-color: var(--pf-accent); }
+    .pf-diff-after-text[contenteditable]:focus { outline: 1px solid var(--pf-border-focus); border-radius: 8px; }
 
     /* ── "Why this rewrite" rationale line ───────────────────────────────── */
     .pf-diff-rationale {
-      font-size: 11px; font-style: italic; color: #64748b;
+      font-size: 11px; font-style: italic; color: var(--pf-text-muted);
       line-height: 1.45; margin-top: 4px; padding: 0 2px;
     }
 
     /* ── System prompt export ────────────────────────────────────────────── */
     .pf-sys-trigger {
-      background: none; border: none; color: rgba(124,58,237,0.55);
+      background: none; border: none; color: var(--pf-text-muted);
       font-size: 11px; cursor: pointer; padding: 4px 2px 0;
       font-family: inherit; text-align: left;
       text-decoration: underline; text-underline-offset: 2px;
-      transition: color 0.15s; display: block;
+      transition: color var(--pf-transition); display: block;
     }
-    .pf-sys-trigger:hover { color: #a78bfa; }
-    .pf-sys-trigger:disabled { color: #475569; cursor: wait; }
-    .pf-sys-box { margin-top: 10px; }
+    .pf-sys-trigger:hover { color: var(--pf-accent); }
+    .pf-sys-trigger:disabled { color: #334155; cursor: wait; }
+    .pf-sys-box { margin-top: 12px; }
     .pf-sys-label {
       font-size: 9px; font-weight: 700; text-transform: uppercase;
-      letter-spacing: 0.08em; color: #7c3aed; margin-bottom: 5px;
+      letter-spacing: 0.08em; color: var(--pf-accent); margin-bottom: 6px;
     }
     .pf-sys-text {
-      background: rgba(124,58,237,0.08); border: 1px solid rgba(124,58,237,0.25);
-      border-radius: 6px; padding: 8px 10px; font-size: 12px; line-height: 1.5;
-      color: #e2e8f0; white-space: pre-wrap; word-break: break-word;
-      outline: none; cursor: text; caret-color: #a78bfa; min-height: 40px;
+      background: rgba(9,9,15,0.6); border: 1px solid var(--pf-border);
+      border-radius: 8px; padding: 10px 12px; font-size: 12px; line-height: 1.5;
+      color: var(--pf-text-primary); white-space: pre-wrap; word-break: break-word;
+      outline: none; cursor: text; caret-color: var(--pf-accent); min-height: 40px;
+      font-family: var(--pf-font-mono);
     }
-    .pf-sys-text:focus { outline: 1px solid rgba(124,58,237,0.55); border-radius: 6px; }
+    .pf-sys-text:focus { outline: 1px solid var(--pf-border-focus); border-radius: 8px; }
     .pf-sys-copy {
-      margin-top: 6px; display: block; background: none;
-      border: 1px solid rgba(124,58,237,0.4); border-radius: 5px;
-      color: #a78bfa; font-size: 11px; font-weight: 600; font-family: inherit;
-      padding: 4px 12px; cursor: pointer; transition: background 0.15s;
+      margin-top: 8px; display: block; background: none;
+      border: 1px solid var(--pf-border); border-radius: var(--pf-radius-btn);
+      color: var(--pf-text-secondary); font-size: 11px; font-weight: 600; font-family: inherit;
+      padding: 6px 14px; cursor: pointer; transition: background var(--pf-transition), color var(--pf-transition);
     }
-    .pf-sys-copy:hover { background: rgba(124,58,237,0.12); }
-
-    /* ── Prompt Chain panel ──────────────────────────────────────────────── */
-    .pf-chain-step { margin-bottom: 10px; }
-    .pf-chain-step-label {
-      font-size: 10px; font-weight: 700; text-transform: uppercase;
-      letter-spacing: 0.08em; margin-bottom: 5px;
-      display: flex; align-items: center; gap: 6px;
-    }
-    .pf-chain-badge {
-      background: linear-gradient(135deg,#7c3aed,#4f46e5);
-      color: #fff; border-radius: 4px; padding: 1px 6px;
-      font-size: 9px; font-weight: 800;
-    }
-    .pf-chain-step-title { color: #a78bfa; }
-    .pf-chain-text {
-      background: rgba(255,255,255,0.05); border-radius: 6px;
-      padding: 8px 10px; font-size: 12px; line-height: 1.5;
-      color: #e2e8f0; white-space: pre-wrap; word-break: break-word;
-      outline: none; cursor: text; caret-color: #a78bfa;
-      min-height: 40px;
-    }
-    .pf-chain-text:focus { outline: 1px solid rgba(124,58,237,0.55); border-radius: 6px; }
-    #pf-chain-use1 { background: rgba(124,58,237,0.2); color: #a78bfa; border: 1px solid rgba(124,58,237,0.4); }
-    #pf-chain-use2 { background: linear-gradient(135deg,#7c3aed,#4f46e5); color: #fff; }
-
-    /* ── Mode chip strip (floats above the ⚡ button) ───────────────────── */
-    #pf-mode-strip {
-      position: fixed;
-      bottom: 140px;
-      right: 80px;
-      display: flex;
-      flex-direction: row;
-      gap: 4px;
-      align-items: center;
-      z-index: 2147483640;
-    }
-    .pf-mode-chip {
-      padding: 4px 10px;
-      border-radius: 12px;
-      border: 1px solid rgba(124,58,237,0.4);
-      background: rgba(20,15,40,0.88);
-      color: #94a3b8;
-      font-size: 11px;
-      font-weight: 600;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      cursor: pointer;
-      white-space: nowrap;
-      backdrop-filter: blur(8px);
-      transition: border-color 0.15s, color 0.15s, background 0.15s;
-      line-height: 1;
-    }
-    .pf-mode-chip:hover { border-color: rgba(124,58,237,0.75); color: #c4b5fd; }
-    .pf-mode-chip.pf-mode-active {
-      background: linear-gradient(135deg, #7c3aed, #4f46e5);
-      border-color: transparent;
-      color: #fff;
-    }
+    .pf-sys-copy:hover { background: var(--pf-bg-surface-hover); color: var(--pf-text-primary); }
 
     /* ── Guided questions panel ──────────────────────────────────────────── */
     #pf-questions {
@@ -334,64 +281,47 @@
       right: 20px;
       width: 380px;
       max-width: calc(100vw - 40px);
-      background: #1a1a2e;
-      border: 1px solid #7c3aed;
-      border-radius: 12px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      color: #e2e8f0;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+      background: var(--pf-bg-panel);
+      border: 1px solid var(--pf-border);
+      border-top: 2px solid var(--pf-accent);
+      border-radius: var(--pf-radius-panel);
+      font-family: var(--pf-font-sans);
+      color: var(--pf-text-primary);
+      box-shadow: var(--pf-shadow-panel);
       z-index: 2147483647;
-      padding: 14px;
+      padding: 16px;
+      overflow: hidden;
     }
     .pf-question-title {
       font-size: 11px;
       font-weight: 700;
-      color: #a78bfa;
+      color: var(--pf-text-primary);
       margin-bottom: 12px;
       text-transform: uppercase;
       letter-spacing: 0.08em;
     }
-    .pf-question-item { margin-bottom: 10px; }
-    .pf-question-label {
-      font-size: 12px;
-      color: #cbd5e1;
-      margin-bottom: 5px;
-      line-height: 1.4;
-    }
-    .pf-question-input {
-      width: 100%;
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(124,58,237,0.3);
-      border-radius: 6px;
-      padding: 7px 10px;
-      color: #e2e8f0;
-      font-size: 12px;
-      font-family: inherit;
-      outline: none;
-      box-sizing: border-box;
-      transition: border-color 0.15s;
-    }
-    .pf-question-input:focus { border-color: rgba(124,58,237,0.7); }
     #pf-questions-footer {
       display: flex;
       gap: 8px;
       justify-content: flex-end;
-      margin-top: 12px;
+      margin-top: 14px;
     }
-    #pf-questions-skip    { background: rgba(255,255,255,0.07); color: #94a3b8; }
-    #pf-questions-submit  { background: linear-gradient(135deg,#7c3aed,#4f46e5); color: #fff; }
+    #pf-questions-skip    { background: var(--pf-bg-surface-hover); color: var(--pf-text-secondary); border: 1px solid var(--pf-border); }
+    #pf-questions-skip:hover { background: rgba(255,255,255,0.08); }
+    #pf-questions-submit  { background: var(--pf-accent); color: #fff; box-shadow: 0 2px 8px var(--pf-accent-glow); }
+    #pf-questions-submit:hover { box-shadow: 0 4px 16px rgba(139,92,246,0.4); }
     .pf-intent-subtitle {
-      font-size: 12px; color: #94a3b8; line-height: 1.45; margin-bottom: 10px;
+      font-size: 12px; color: var(--pf-text-secondary); line-height: 1.45; margin-bottom: 10px;
     }
     .pf-intent-input {
-      width: 100%; background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(124,58,237,0.3); border-radius: 6px;
-      padding: 8px 10px; color: #e2e8f0; font-size: 12px; font-family: inherit;
+      width: 100%; background: rgba(9,9,15,0.6);
+      border: 1px solid var(--pf-border); border-radius: var(--pf-radius-btn);
+      padding: 10px 12px; color: var(--pf-text-primary); font-size: 12px; font-family: inherit;
       outline: none; box-sizing: border-box; resize: vertical;
-      min-height: 80px; line-height: 1.5; transition: border-color 0.15s;
+      min-height: 80px; line-height: 1.5; transition: border-color var(--pf-transition);
     }
-    .pf-intent-input:focus { border-color: rgba(124,58,237,0.7); }
-    .pf-intent-input::placeholder { color: rgba(148,163,184,0.4); font-style: italic; }
+    .pf-intent-input:focus { border-color: var(--pf-border-focus); }
+    .pf-intent-input::placeholder { color: rgba(148,163,184,0.35); font-style: italic; }
   `;
 
   const styleEl = document.createElement('style');
@@ -403,7 +333,8 @@
 
   let toastEl = null;
   let toastTimer = null;
-  let activeMode = 'auto'; // persisted in chrome.storage.local as 'pfMode'
+  const activeMode = 'auto';
+  let pfEngine = 'claude'; // default to Claude on claude.ai — it's the best model for the job
 
   function toast(html, type = 'info', ms = 4000) {
     if (!toastEl) {
@@ -425,9 +356,10 @@
     btn.disabled = true;
     btn.style.width = 'auto';
     btn.style.borderRadius = '8px';
-    btn.style.padding = '0 8px';
+    btn.style.padding = '0 10px';
     btn.style.fontSize = '11px';
     btn.style.whiteSpace = 'nowrap';
+    btn.style.animation = 'pf-pulse 1.5s ease-in-out infinite';
   }
 
   function restoreButton(btn) {
@@ -439,6 +371,7 @@
     btn.style.padding = '';
     btn.style.fontSize = '16px';
     btn.style.whiteSpace = '';
+    btn.style.animation = '';
   }
 
   /* ── Find the platform's contenteditable input ─────────────────────────── */
@@ -468,47 +401,6 @@
     for (const sel of candidates) {
       const el = document.querySelector(sel);
       if (el) return el;
-    }
-    return null;
-  }
-
-  /* ── Find where to insert the button (before the send button) ─────────── */
-
-  function findInsertionPoint(editor) {
-    // Walk up from the editor looking for a sibling container with buttons
-    let node = editor;
-    for (let depth = 0; depth < 10; depth++) {
-      node = node.parentElement;
-      if (!node) break;
-
-      // Preferred: a button with a send-like aria-label
-      const sendSels = [
-        'button[aria-label="Send message"]',
-        'button[aria-label="Send Message"]',
-        'button[aria-label*="send" i]',
-        'button[data-testid*="send" i]',
-        'button[type="submit"]',
-      ];
-      for (const s of sendSels) {
-        const sendBtn = node.querySelector(s);
-        // Use sendBtn.parentNode (not .parentElement from the wrapper query) so
-        // the reference node is guaranteed to be a direct child of the parent.
-        if (sendBtn && sendBtn.id !== 'pf-optimize-btn' && sendBtn.parentNode) {
-          return { parent: sendBtn.parentNode, before: sendBtn };
-        }
-      }
-
-      // Fallback: any sibling element that contains ≥1 *direct-child* button
-      for (const child of node.children) {
-        if (child === editor) continue;
-        // Only look at direct children so `before` is always a child of `parent`
-        const directBtn = [...child.children].find(
-          c => c.tagName === 'BUTTON' && c.id !== 'pf-optimize-btn'
-        );
-        if (directBtn) {
-          return { parent: child, before: directBtn };
-        }
-      }
     }
     return null;
   }
@@ -567,31 +459,114 @@
     s.addRange(r);
   }
 
+  /* ── Structural DOM fallback for conversation scraping ─────────────────── */
+  // When CSS selectors all fail (Claude.ai redesign), walk the DOM tree to find
+  // the conversation container and extract messages by structural patterns.
+
+  function scrapeConversationStructural() {
+
+    // Strategy 1: Find the main scrollable conversation area.
+    // Claude.ai typically has a main chat area with child elements for each message.
+    // Look for a scrollable container with multiple large text-containing children.
+    const candidates = document.querySelectorAll('main, [role="main"], [role="log"], [class*="conversation"], [class*="chat-messages"], [class*="message-list"], [class*="thread"]');
+
+    for (const container of candidates) {
+      // Find direct children or close descendants that look like message blocks
+      const blocks = [...container.querySelectorAll(':scope > div, :scope > div > div, :scope > article, [role="article"]')]
+        .filter(el => {
+          const text = (el.textContent || '').trim();
+          // Message blocks are typically 20+ chars and not huge wrapper elements
+          return text.length > 20 && text.length < 50000 &&
+            el.children.length < 50 && // not a huge wrapper
+            !el.closest('#pf-diff, #pf-questions, nav, header, footer, aside');
+        });
+
+      if (blocks.length >= 2) {
+        pfLog(`[structural] Found ${blocks.length} potential message blocks in`, container.tagName, container.className?.slice(0, 60));
+
+        // Classify: in Claude.ai, messages alternate human/assistant.
+        // Human messages are typically shorter and don't contain code blocks.
+        // Assistant messages often have markdown formatting, code, lists.
+        const humanEls = [];
+        const assistantEls = [];
+
+        // Check if blocks have any distinguishing attributes
+        const hasRoleAttr = blocks.some(b =>
+          b.getAttribute('data-role') || b.getAttribute('data-message-author-role') ||
+          b.getAttribute('data-type') || b.className?.match(/human|user|assistant|ai|bot|claude/i)
+        );
+
+        if (hasRoleAttr) {
+          // Use attributes to classify
+          for (const block of blocks) {
+            const attrs = `${block.getAttribute('data-role') || ''} ${block.getAttribute('data-message-author-role') || ''} ${block.getAttribute('data-type') || ''} ${block.className || ''}`.toLowerCase();
+            if (attrs.match(/human|user/)) humanEls.push(block);
+            else if (attrs.match(/assistant|ai|bot|claude|model|response/)) assistantEls.push(block);
+          }
+        }
+
+        if (humanEls.length === 0 && assistantEls.length === 0) {
+          // Fallback: assume alternating pattern (human first, then assistant, etc.)
+          // This is the standard Claude.ai pattern
+          for (let i = 0; i < blocks.length; i++) {
+            if (i % 2 === 0) humanEls.push(blocks[i]);
+            else assistantEls.push(blocks[i]);
+          }
+        }
+
+        if (humanEls.length > 0 || assistantEls.length > 0) {
+          return { humanEls, assistantEls, method: 'structural-dom-walk' };
+        }
+      }
+    }
+
+    // Strategy 2: Look for any element with role="article" — common for chat messages
+    const articles = [...document.querySelectorAll('[role="article"]')]
+      .filter(el => !el.closest('#pf-diff, #pf-questions, nav, header, footer'));
+    if (articles.length >= 2) {
+      const humanEls = [];
+      const assistantEls = [];
+      for (let i = 0; i < articles.length; i++) {
+        if (i % 2 === 0) humanEls.push(articles[i]);
+        else assistantEls.push(articles[i]);
+      }
+      return { humanEls, assistantEls, method: 'role-article-walk' };
+    }
+
+    return null;
+  }
+
   /* ── Scrape visible conversation for context ──────────────────────────── */
 
   function scrapeConversation() {
-    const PF = '[PromptForge scrape]';
 
     // ── Platform-specific selectors — each role finds its best match independently
     const HUMAN_SELS = PLATFORM === 'gemini' ? [
-      // Gemini uses Angular custom elements; try specific → generic
       'user-query-text',
       '.query-text',
       'user-query .query-content',
       '[class*="user-query"]',
       '[data-message-author-role="user"]',
     ] : [
+      // ── VERIFIED on Claude.ai March 2026 ──
+      // Human messages have class "font-user-message" and data-testid="user-message"
+      '.font-user-message',
+      '[class*="font-user-message"]',
+      '[data-testid="user-message"]',
+      '[class*="user-message"]',
+      // Fallback: older/future selectors
       '[data-testid="human-turn"]',
       '[data-testid="user-turn"]',
-      '[data-testid="user-message"]',
       '[data-message-author-role="user"]',
       '[data-role="user"]',
       '[class*="HumanTurn"]',
       '[class*="human-turn"]',
       '[class*="UserMessage"]',
-      '[class*="user-message"]',
       '[class*="humanMessage"]',
+      '[class*="userTurn"]',
+      // ARIA fallback
       '[aria-label*="You said" i]',
+      '[aria-label*="Your message" i]',
     ];
 
     const ASSISTANT_SELS = PLATFORM === 'gemini' ? [
@@ -602,55 +577,88 @@
       '[data-message-author-role="model"]',
       '.response-container .markdown',
     ] : [
+      // ── VERIFIED on Claude.ai March 2026 ──
+      // Assistant messages have class "font-claude-response"
+      '.font-claude-response',
+      '[class*="font-claude-response"]',
+      '[class*="claude-response"]',
+      // Fallback: older class name and future variants
+      '.font-claude-message',
+      '[class*="claude-message"]',
+      '[class*="claude-answer"]',
+      // Data attribute fallbacks
       '[data-testid="ai-turn"]',
       '[data-testid="assistant-turn"]',
       '[data-testid="assistant-message"]',
-      '.font-claude-message',
       '[data-message-author-role="assistant"]',
       '[data-role="assistant"]',
-      '[class*="AiTurn"]',
-      '[class*="ai-turn"]',
+      // Class substring fallbacks
       '[class*="AssistantMessage"]',
       '[class*="assistant-message"]',
       '[class*="assistantMessage"]',
-      '[class*="Assistant"]',
+      '[class*="AiTurn"]',
+      '[class*="ai-turn"]',
+      // ARIA fallback
       '[aria-label*="Claude" i]',
+      '[aria-label*="Assistant" i]',
     ];
 
     const firstMatch = (sels) => {
       for (const sel of sels) {
-        const els = [...document.querySelectorAll(sel)];
-        if (els.length > 0) return { els, sel };
+        try {
+          const raw = [...document.querySelectorAll(sel)];
+          if (raw.length === 0) continue;
+          // Filter to outermost elements only — if a matched element is nested
+          // inside another matched element, drop the inner one. This prevents
+          // counting every paragraph inside a Claude response as a separate turn.
+          const els = raw.filter(el => !raw.some(other => other !== el && other.contains(el)));
+          if (els.length > 0) return { els, sel };
+        } catch { /* invalid selector — skip */ }
       }
       return { els: [], sel: null };
     };
 
-    const { els: humanEls,     sel: humanSel     } = firstMatch(HUMAN_SELS);
-    const { els: assistantEls, sel: assistantSel } = firstMatch(ASSISTANT_SELS);
+    let { els: humanEls,     sel: humanSel     } = firstMatch(HUMAN_SELS);
+    let { els: assistantEls, sel: assistantSel } = firstMatch(ASSISTANT_SELS);
 
     // ── Always log both counts so mismatches are immediately visible ───────
-    console.log(PF,
+    pfLog('[scrape]',
       `Human: ${humanEls.length} via ${humanSel || '(no match)'}  |  ` +
       `Assistant: ${assistantEls.length} via ${assistantSel || '(no match)'}`
     );
 
+    // ── Structural fallback: walk the DOM conversation container ────────────
+    // When CSS selectors fail (Claude.ai redesign), find the main message list
+    // and classify children by position/content patterns.
     if (humanEls.length === 0 && assistantEls.length === 0) {
-      console.warn(PF, `⚠️  No turns found (platform: ${PLATFORM}). All data-testid values in DOM:`,
-        [...new Set(
-          [...document.querySelectorAll('[data-testid]')]
-            .map(el => el.getAttribute('data-testid'))
-        )].sort()
-      );
-      console.info(PF, '.font-claude-message count:',
-        document.querySelectorAll('.font-claude-message').length);
+      console.warn('[PromptForge scrape]', `No turns found via selectors (platform: ${PLATFORM}). Trying structural fallback...`);
 
-      // Broad fallback: when structured selectors fail, scan for any large text
-      // block that looks like an AI response so Agent 1 still has something to
-      // classify domain/task from. Exclude our own injected panels.
+      // Log available data-testid values for debugging
+      const testIds = [...new Set(
+        [...document.querySelectorAll('[data-testid]')]
+          .map(el => el.getAttribute('data-testid'))
+      )].sort();
+      console.info('[PromptForge scrape]', 'data-testid values in DOM:', testIds);
+
+      // Strategy A: find conversation container and extract alternating messages
+      const structuralResult = scrapeConversationStructural();
+      if (structuralResult) {
+        humanEls = structuralResult.humanEls;
+        assistantEls = structuralResult.assistantEls;
+        humanSel = structuralResult.method;
+        assistantSel = structuralResult.method;
+        pfLog('[scrape]', `Structural fallback recovered ${humanEls.length} human + ${assistantEls.length} assistant turns via ${structuralResult.method}`);
+      }
+    }
+
+    // ── Broad text-block fallback (last resort) ──────────────────────────────
+    if (humanEls.length === 0 && assistantEls.length === 0) {
       const BROAD_SELS = [
         '[class*="markdown"]:not(#pf-diff *):not(#pf-questions *)',
         '[class*="prose"]:not(#pf-diff *):not(#pf-questions *)',
-        '[class*="response-text"]:not(#pf-diff *)',
+        '[class*="message"]:not(#pf-diff *):not(#pf-questions *):not(input):not(textarea)',
+        '[class*="response"]:not(#pf-diff *):not(#pf-questions *)',
+        '[class*="content"]:not(#pf-diff *):not(#pf-questions *):not(script):not(style)',
         '[class*="assistant"]:not(#pf-diff *)',
         '[class*="claude"]:not(#pf-diff *)',
       ];
@@ -658,15 +666,18 @@
       for (const sel of BROAD_SELS) {
         try {
           const els = [...document.querySelectorAll(sel)]
-            .filter(el => (el.textContent || '').trim().length > 150);
+            .filter(el => {
+              const text = (el.textContent || '').trim();
+              return text.length > 100 && text.length < 50000 && !el.closest('#pf-diff, #pf-questions');
+            });
           if (els.length > 0) {
             broadLastMsg = (els[els.length - 1].textContent || '').trim().slice(0, 3000);
-            console.log(PF, `Broad fallback: recovered last response (${broadLastMsg.length} chars) via "${sel}"`);
+            pfLog('[scrape]', `Broad fallback: recovered last response (${broadLastMsg.length} chars) via "${sel}"`);
             break;
           }
         } catch { /* invalid selector — skip */ }
       }
-      if (!broadLastMsg) console.warn(PF, 'Broad fallback also found nothing — pipeline will run without context.');
+      if (!broadLastMsg) console.warn('[PromptForge scrape]', 'All fallbacks failed — pipeline will run without context.');
       return { turns: [], lastAssistantMessage: broadLastMsg };
     }
 
@@ -688,7 +699,7 @@
       ? (lastAssistantEl.textContent || lastAssistantEl.innerText || '').trim().slice(0, 3000) || null
       : null;
     if (lastAssistantMessage)
-      console.log(PF, `Last assistant message (${lastAssistantMessage.length} chars):`, lastAssistantMessage.slice(0, 120) + '…');
+      pfLog('[scrape]', `Last assistant message (${lastAssistantMessage.length} chars):`, lastAssistantMessage.slice(0, 120) + '…');
 
     // ── Extract text, filter blanks, cap length ────────────────────────────
     const turns = tagged
@@ -706,9 +717,9 @@
     const final = turns.slice(-12);
 
     // ── Confirm what we're sending ────────────────────────────────────────
-    console.log(PF, `Sending ${final.length} turns as context:`);
+    pfLog('[scrape]', `Sending ${final.length} turns as context:`);
     final.forEach((t, i) =>
-      console.log(PF, `  [${i}] ${t.role}: ${t.content.slice(0, 80)}…`)
+      pfLog('[scrape]', `  [${i}] ${t.role}: ${t.content.slice(0, 80)}…`)
     );
 
     return { turns: final, lastAssistantMessage };
@@ -727,7 +738,6 @@
     } catch (e) {
       if (e?.message?.includes('Extension context invalidated')) {
         document.getElementById('pf-optimize-btn')?.remove();
-        document.getElementById('pf-mode-strip')?.remove();
         console.warn('[PromptForge] Extension context invalidated — button removed. Reload the page to reactivate.');
       }
       return null;
@@ -839,108 +849,11 @@
     document.addEventListener('keydown', onEscape);
   }
 
-  /* ── Prompt Chain panel (D) ────────────────────────────────────────────── */
-  // Renders two editable boxes: Step 1 (priming) and Step 2 (main task).
-  // User sends Step 1 first to get Claude thinking, then sends Step 2.
-
-  function showChainPanel(optimized, editor, sources) {
-    const [priming, main] = optimized.split('\n\n---CHAIN→---\n\n');
-
-    const panel = document.createElement('div');
-    panel.id = 'pf-diff';
-
-    const header = document.createElement('div');
-    header.id = 'pf-diff-header';
-    const title = document.createElement('span');
-    title.textContent = '⚡ Prompt Chain — Send in order';
-    const closeBtn = document.createElement('button');
-    closeBtn.id = 'pf-diff-close'; closeBtn.type = 'button'; closeBtn.textContent = '✕';
-    header.append(title, closeBtn);
-
-    const body = document.createElement('div');
-    body.id = 'pf-diff-body';
-
-    const makeStep = (badge, labelText, content) => {
-      const wrap = document.createElement('div');
-      wrap.className = 'pf-chain-step';
-
-      const lbl = document.createElement('div');
-      lbl.className = 'pf-chain-step-label';
-      const badgeEl = document.createElement('span');
-      badgeEl.className = 'pf-chain-badge';
-      badgeEl.textContent = badge;
-      const titleEl = document.createElement('span');
-      titleEl.className = 'pf-chain-step-title';
-      titleEl.textContent = labelText;
-      lbl.append(badgeEl, titleEl);
-
-      const txt = document.createElement('div');
-      txt.className = 'pf-chain-text';
-      txt.contentEditable = 'true';
-      txt.spellcheck = false;
-      txt.textContent = content;
-
-      wrap.append(lbl, txt);
-      return { wrap, txt };
-    };
-
-    const { wrap: step1Wrap, txt: step1El } = makeStep('STEP 1', 'Send first — gets Claude thinking', priming);
-    const { wrap: step2Wrap, txt: step2El } = makeStep('STEP 2', 'Then send — the full task', main);
-    body.append(step1Wrap, step2Wrap);
-
-    const footer = document.createElement('div');
-    footer.id = 'pf-diff-footer';
-
-    const keepBtn = document.createElement('button');
-    keepBtn.id = 'pf-diff-keep'; keepBtn.className = 'pf-diff-btn';
-    keepBtn.type = 'button'; keepBtn.textContent = 'Keep original';
-
-    const use1Btn = document.createElement('button');
-    use1Btn.id = 'pf-chain-use1'; use1Btn.className = 'pf-diff-btn';
-    use1Btn.type = 'button'; use1Btn.textContent = 'Use Step 1 →';
-
-    const use2Btn = document.createElement('button');
-    use2Btn.id = 'pf-chain-use2'; use2Btn.className = 'pf-diff-btn';
-    use2Btn.type = 'button'; use2Btn.textContent = 'Use Step 2 →';
-
-    footer.append(keepBtn, use1Btn, use2Btn);
-    panel.append(header, body, footer);
-    document.body.appendChild(panel);
-
-    const dismiss = () => { panel.remove(); document.removeEventListener('keydown', onKey); };
-
-    closeBtn.addEventListener('click', dismiss);
-    keepBtn.addEventListener('click',  dismiss);
-
-    use1Btn.addEventListener('click', () => {
-      setEditorText(editor, (step1El.innerText || '').trim() || priming);
-      toast('⚡ Step 1 applied — send it, then come back for Step 2', 'success', 5500);
-      dismiss();
-    });
-    use2Btn.addEventListener('click', () => {
-      setEditorText(editor, (step2El.innerText || '').trim() || main);
-      const byLine = sources.length > 0
-        ? `<br><small style="opacity:0.75">patterns from: ${sources.join(', ')}</small>`
-        : '';
-      toast(`⚡ Step 2 applied — ready to send${byLine}`, 'success', 4500);
-      dismiss();
-    });
-
-    const onKey = (e) => { if (e.key === 'Escape') dismiss(); };
-    document.addEventListener('keydown', onKey);
-  }
-
   /* ── Before/after diff panel ───────────────────────────────────────────── */
 
   function showDiff(original, optimized, editor, sources, rationale = '') {
-    console.log('[Modal AFTER text]:', optimized);
+    pfLog('Modal AFTER text:', optimized);
     document.getElementById('pf-diff')?.remove();
-
-    // Chain mode produces two prompts separated by a sentinel
-    if (optimized.includes('\n\n---CHAIN→---\n\n')) {
-      showChainPanel(optimized, editor, sources);
-      return;
-    }
 
     const panel = document.createElement('div');
     panel.id = 'pf-diff';
@@ -949,7 +862,7 @@
     const header = document.createElement('div');
     header.id = 'pf-diff-header';
     const title = document.createElement('span');
-    title.textContent = '⚡ Prompt Forge — Review Changes';
+    title.textContent = '⚡ Prompt Forge — Optimized';
     const closeBtn = document.createElement('button');
     closeBtn.id = 'pf-diff-close';
     closeBtn.type = 'button';
@@ -1097,11 +1010,17 @@
         })).catch(() => {});
       }
 
+      // Save the accepted prompt so future searches can reference what worked
+      safeRuntime(() => chrome.runtime.sendMessage({
+        type: 'SAVE_ACCEPTED_PROMPT',
+        payload: { prompt: finalText },
+      })).catch(() => {});
+
       setEditorText(editor, finalText);
       const byLine = sources.length > 0
         ? `<br><small style="opacity:0.75">patterns from: ${sources.join(', ')}</small>`
         : '';
-      toast(`⚡ Optimized using prompts.chat${byLine}`, 'success', 4500);
+      toast(`⚡ Prompt optimized${byLine}`, 'success', 4500);
       dismiss();
     });
 
@@ -1115,7 +1034,7 @@
   /* ── Click handler — entry point ──────────────────────────────────────── */
 
   async function handleOptimize() {
-    console.log('[PromptForge] handleOptimize — activeMode:', activeMode, '— platform:', PLATFORM);
+    pfLog('handleOptimize — activeMode:', activeMode, '— platform:', PLATFORM);
     const btn    = document.getElementById('pf-optimize-btn');
     const editor = findEditor();
 
@@ -1130,11 +1049,38 @@
       return;
     }
 
-    // Check for Groq API key
+    // Load engine preference
+    try {
+      const s = await safeRuntime(() => chrome.storage.local.get('pfEngine'));
+      if (s?.pfEngine) pfEngine = s.pfEngine;
+    } catch {}
+
+    // ── Too vague to optimize? (only for standalone prompts with no chat) ──
+    const { turns: chatHistory, lastAssistantMessage } = scrapeConversation();
+    const hasContext = chatHistory.length > 0 || !!lastAssistantMessage;
+
+    const meaningfulWords = raw.replace(/[^\w\s]/g, '').split(/\s+/)
+      .filter(w => w.length > 2 && !['help','please','want','need','just','some','the','and',
+        'for','with','about','this','that','what','how','can','you','your','like','get',
+        'make','give','tell','show','its','has','was','are','been','have','very','really',
+        'but','not','out','more','any','all'].includes(w.toLowerCase()));
+
+    if (meaningfulWords.length < 2 && !hasContext) {
+      toast('Add more detail — what specifically do you need help with?', 'info', 4000);
+      return;
+    }
+
+    // ── Claude self-optimize (default) ──────────────────────────────────────
+    if (pfEngine === 'claude') {
+      runClaudeOptimize(raw, editor);
+      return;
+    }
+
+    // ── Groq pipeline (fallback) ────────────────────────────────────────────
     let key;
     try {
       const stored = await safeRuntime(() => chrome.storage.sync.get('groqApiKey'));
-      if (!stored) return; // context invalidated — button already removed
+      if (!stored) return;
       key = stored.groqApiKey;
     } catch {
       key = null;
@@ -1142,8 +1088,8 @@
 
     if (!key) {
       toast(
-        `⚡ <strong>Prompt Forge</strong>: No Groq API key. ` +
-        `<button class="pf-link" id="pf-open-opts">Open Settings →</button>`,
+        'No Groq API key set. Switch to Claude engine in Settings, or add a Groq key. ' +
+        '<button class="pf-link" id="pf-open-opts">Settings →</button>',
         'error', 8000
       );
       document.getElementById('pf-open-opts')?.addEventListener('click', () => {
@@ -1152,45 +1098,58 @@
       return;
     }
 
-    const { turns: chatHistory, lastAssistantMessage } = scrapeConversation();
-    const hasContext = chatHistory.length > 0 || !!lastAssistantMessage;
-
-    // ── Vague prompt + no context → auto-redirect to Guide mode ─────────────
-    // A short vague prompt ("help me", "fix this") with zero chat context
-    // produces a useless generic rewrite. Guide mode collects intent first.
-    if (raw.trim().length < 20 && !hasContext && activeMode !== 'guided') {
-      toast(
-        '💡 Short prompt + no chat history detected — switching to <strong>Guide</strong> mode for a better result.',
-        'info', 5500
-      );
-      activeMode = 'guided';
-      document.querySelectorAll('.pf-mode-chip').forEach(c =>
-        c.classList.toggle('pf-mode-active', c.dataset.mode === 'guided')
-      );
+    const isVague = raw.trim().length < 50 || /^(help|teach|explain|show|tell|make|fix|do|how|what)\s/i.test(raw.trim());
+    if (isVague && !hasContext) {
       showIntentPanel((answers) => {
         runPipeline(raw, chatHistory, lastAssistantMessage, answers, editor);
       });
       return;
     }
 
-    // ── Warn (but don't block) when context is missing for longer prompts ────
-    if (!hasContext) {
-      toast(
-        '⚠️ No chat history found — result may be generic. Try <strong>Guide</strong> mode to describe your goal.',
-        'info', 5000
-      );
-    }
-
-    // ── Guided mode: show intent panel first, then run ───────────────────────
-    if (activeMode === 'guided') {
-      showIntentPanel((answers) => {
-        runPipeline(raw, chatHistory, lastAssistantMessage, answers, editor);
-      });
-      return;
-    }
-
-    // ── All other modes: run pipeline directly ───────────────────────────────
     runPipeline(raw, chatHistory, lastAssistantMessage, [], editor);
+  }
+
+  /* ── Claude API optimize flow ──────────────────────────────────────────── */
+  // Calls the Anthropic API via the background service worker.
+  // No chat pollution — runs entirely in the background.
+
+  async function runClaudeOptimize(originalPrompt, editor) {
+    const btn = document.getElementById('pf-optimize-btn');
+    setLoadingLabel(btn, '⚡ Claude...');
+
+    const { turns: chatHistory, lastAssistantMessage } = scrapeConversation();
+
+    try {
+      const res = await safeRuntime(() => chrome.runtime.sendMessage({
+        type: 'OPTIMIZE_WITH_CLAUDE',
+        payload: { prompt: originalPrompt, chatHistory, lastAssistantMessage },
+      }));
+
+      if (!res) return;
+
+      if (!res.success) {
+        if (res.error === 'NO_API_KEY') {
+          toast(
+            'No Anthropic API key set. ' +
+            '<button class="pf-link" id="pf-open-opts">Open Settings →</button>',
+            'error', 8000
+          );
+          document.getElementById('pf-open-opts')?.addEventListener('click', () => {
+            safeRuntime(() => chrome.runtime.sendMessage({ type: 'OPEN_OPTIONS' }));
+          });
+          return;
+        }
+        throw new Error(res.error);
+      }
+
+      const sources = (res.data.inspiredBy || []).filter(Boolean);
+      showDiff(originalPrompt, res.data.optimized, editor, sources, '');
+    } catch (err) {
+      const msg = String(err?.message || err).replace(/^Error:\s*/i, '');
+      toast(`${msg}`, 'error', 6000);
+    } finally {
+      restoreButton(btn);
+    }
   }
 
   /* ── Pipeline runner (called directly or after guided questions) ───────── */
@@ -1199,7 +1158,7 @@
     const btn = document.getElementById('pf-optimize-btn');
     setLoadingLabel(btn, '⚡ Pruning...');
 
-    console.log('[PromptForge] Optimizing with context:',
+    pfLog('Optimizing with context:',
       { promptLength: raw.length, historyTurns: chatHistory.length,
         lastAssistantChars: lastAssistantMessage?.length ?? 0,
         mode: activeMode, answers: answers.length });
@@ -1224,7 +1183,7 @@
     }
   }
 
-  /* ── Inject the fixed-position button + mode strip ────────────────────── */
+  /* ── Inject the fixed-position button ──────────────────────────────────── */
 
   function inject() {
     // Idempotent: bail immediately if already present
@@ -1241,13 +1200,13 @@
     btn.textContent = '⚡';
     btn.title = '';
     btn.setAttribute('data-pf-tip',
-      'Type your prompt, then click ⚡ to optimize it using proven patterns from prompts.chat');
+      'Type your prompt, then click ⚡ to optimize it using proven patterns from multiple sources');
     btn.style.cssText = [
       'position:fixed',
       'bottom:90px',
       'right:80px',
       'z-index:9999',
-      'background:#7c3aed',
+      'background:#8b5cf6',
       'color:#fff',
       'border:none',
       'border-radius:50%',
@@ -1255,66 +1214,19 @@
       'height:36px',
       'font-size:16px',
       'cursor:pointer',
-      'box-shadow:0 2px 8px rgba(0,0,0,0.3)',
-      'transition:opacity 0.15s,transform 0.1s',
+      'box-shadow:0 4px 12px rgba(139,92,246,0.3)',
+      'transition:opacity 0.15s ease,transform 0.15s ease,box-shadow 0.15s ease',
     ].join(';');
 
     document.body.appendChild(btn);
     btn.addEventListener('click', handleOptimize);
-
-    // ── Mode chip strip ─────────────────────────────────────────────────────
-    const strip = document.createElement('div');
-    strip.id = 'pf-mode-strip';
-
-    const MODES = [
-      { id: 'auto',     label: 'Auto'     },
-      { id: 'learn',    label: 'Learn'    },
-      { id: 'brief',    label: 'Brief'    },
-      { id: 'deep',     label: 'Deep'     },
-      { id: 'creative', label: 'Creative' },
-      { id: 'guided',   label: 'Guide'    },
-      { id: 'chain',    label: 'Chain'    },
-    ];
-
-    const renderChips = () => {
-      strip.querySelectorAll('.pf-mode-chip').forEach(c => {
-        c.classList.toggle('pf-mode-active', c.dataset.mode === activeMode);
-      });
-    };
-
-    MODES.forEach(({ id, label }) => {
-      const chip = document.createElement('button');
-      chip.type = 'button';
-      chip.className = `pf-mode-chip${activeMode === id ? ' pf-mode-active' : ''}`;
-      chip.dataset.mode = id;
-      chip.textContent = label;
-      chip.addEventListener('click', () => {
-        activeMode = id;
-        safeRuntime(() => chrome.storage.local.set({ pfMode: id }));
-        renderChips();
-      });
-      strip.appendChild(chip);
-    });
-
-    document.body.appendChild(strip);
-
-    // Load the previously saved mode
-    safeRuntime(() =>
-      chrome.storage.local.get('pfMode').then(s => {
-        if (s.pfMode && MODES.some(m => m.id === s.pfMode)) {
-          activeMode = s.pfMode;
-          renderChips();
-        }
-      }).catch(() => {})
-    );
   }
 
   /* ── Retry loop: poll until the editor exists, then inject once ────────── */
 
   function tryInject() {
-    // Remove any stale button + mode strip from a previous chat
+    // Remove any stale button from a previous chat
     document.getElementById('pf-optimize-btn')?.remove();
-    document.getElementById('pf-mode-strip')?.remove();
 
     let attempts = 0;
     const id = setInterval(() => {
@@ -1351,6 +1263,13 @@
   });
 
   /* ── Boot ──────────────────────────────────────────────────────────────── */
+
+  // Load engine preference
+  safeRuntime(() =>
+    chrome.storage.local.get('pfEngine').then(s => {
+      if (s.pfEngine) pfEngine = s.pfEngine;
+    }).catch(() => {})
+  );
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', tryInject);
